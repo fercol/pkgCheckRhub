@@ -899,8 +899,6 @@ basta.default <- function(object, dataType = "CMR",
   if (nsim > 1) {
     cat("Multiple simulations started...\n\n") 
     if (parallel) {
-      opp <- options()
-      options(warn = -1)
       sfInit(parallel = TRUE, cpus = ncpus)
       sfExport(list = c(intVars, ".Random.seed"))
       # if (Sys.info()[4] == "ADM-130757-Mac") {
@@ -921,7 +919,6 @@ basta.default <- function(object, dataType = "CMR",
                                    .CalcCumHaz.matrix, .JitterPars)
       sfRemoveAll(hidden = TRUE)
       sfStop()
-      options(opp)
     } else {
       bastaOut <- lapply(1:nsim, .RunMCMC, UpdJumps = FALSE, 
                          parJumps = jumpRun$jumps, ageObj, dataObj,
@@ -997,8 +994,9 @@ basta.default <- function(object, dataType = "CMR",
   return(bastaFinal)
 }
 
-# A.3) plotting BaSTA outputs:
-# ---------------------------- #
+# A.3) plotting and printing BaSTA outputs:
+# ----------------------------------------- #
+# Plotting:
 plot.basta <- function(x, plot.type = "traces", trace.name = "theta",
                        densities = FALSE, noCIs = FALSE, minSurv = NULL, ...) {
   # User par settings:
@@ -1006,13 +1004,8 @@ plot.basta <- function(x, plot.type = "traces", trace.name = "theta",
   on.exit(par(oldpar))
   
   # Wrong plot.type:
-  if (!plot.type %in% c("traces", "demorates", "gof")) {
-    stop("Wrong value for argument 'plot.type'.\nAlternatives are 'traces', 'demorates', or 'gof'.")
-  }
-  
-  # Wrong trace.name:
-  if (!plot.type %in% c("traces", "demorates", "gof")) {
-    stop("Wrong value for argument 'plot.type'.\nAlternatives are 'traces', 'demorates', or 'gof'.")
+  if (!plot.type %in% c("traces", "demorates", "gof", "fancy")) {
+    stop("Wrong value for argument 'plot.type'.\nAlternatives are 'traces', 'demorates', 'gof', or 'fancy'.")
   }
   
   args <- list(...)
@@ -1042,6 +1035,23 @@ plot.basta <- function(x, plot.type = "traces", trace.name = "theta",
   } else {
     lty <- 1
   }
+  
+  if (plot.type %in% c("demorates", "fancy")) {
+    catNames <- names(x$mort)
+    lenCat <- length(catNames)
+    
+    if ("names.legend" %in% names(args)) {
+      if (length(args$names.legend) != nv) {
+        stop(sprintf("Wrong length in 'names.legend'. Correct length is %s elements.",
+                     nv), call. = FALSE)
+      } else {
+        legNames <- args$names.legend
+      }
+    } else {
+      legNames <- catNames
+    }
+  }
+  
   # ========== #
   # PARAMETERS:
   # ========== #
@@ -1222,23 +1232,14 @@ plot.basta <- function(x, plot.type = "traces", trace.name = "theta",
       } else {
         xlim <- c(0, 0)
       }
-      vars <- names(x$mort)
-      if ("names.legend" %in% names(args)) {
-        names.legend <- args$names.legend
-        if (length(vars) != length(names.legend)) {
-          warning(sprintf("Wrong length of names.legend, length should be equal to number of categorical covariates, i.e., %s.", length(vars)))
-        } else {
-          vars <- names.legend
-        }
-      }
       minAge <- as.numeric(x$modelSpecs["min. age"])
-      for (nta in 1:length(x$mort)) {
+      for (icat in 1:lenCat) {
         if (is.null(minSurv)) {
-          cuts <- x$cuts[[nta]]
+          cuts <- x$cuts[[icat]]
         } else {
-          cuts <- which(x$surv[[nta]][1, ] >= minSurv)
+          cuts <- which(x$surv[[icat]][1, ] >= minSurv)
         }
-        ylim <- range(c(ylim, x[[demv]][[nta]][, cuts]), 
+        ylim <- range(c(ylim, x[[demv]][[icat]][, cuts]), 
                       na.rm = TRUE)
         if (! "xlim" %in% names(args)) {
           xlim <- range(c(xlim, x$x[cuts] + minAge), na.rm = TRUE)
@@ -1247,14 +1248,14 @@ plot.basta <- function(x, plot.type = "traces", trace.name = "theta",
       plot(xlim, ylim, col = NA, xlab = "", ylab = demvname[demv])
       if (minAge > 0) lines(rep(minAge, 2), ylim, lty = 2)
       nn <- 0
-      for (nta in 1:length(x$mort)) {
+      for (icat in 1:lenCat) {
         nn <- nn + 1
         if (is.null(minSurv)) {
-          cuts <- x$cuts[[nta]]
+          cuts <- x$cuts[[icat]]
         } else {
-          cuts <- which(x$surv[[nta]][1, ] >= minSurv)
+          cuts <- which(x$surv[[icat]][1, ] >= minSurv)
         }
-        yy <- x[[demv]][[nta]][, cuts]
+        yy <- x[[demv]][[icat]][, cuts]
         xx <- x$x[cuts]
         if (!noCIs) {
           polygon(c(xx, rev(xx)) + minAge, c(yy[2, ], rev(yy[3, ])), 
@@ -1267,13 +1268,17 @@ plot.basta <- function(x, plot.type = "traces", trace.name = "theta",
               lty = ltyy)
       }
       if (nn > 1 & demv == 'surv') {
-        legend('topright', vars, col = Palette[1:nn], pch = 15, bty = 'n')
+        legend(x = 'topright', legend = legNames, 
+               pch = 22, pt.cex = 2, cex = 1.25, 
+               pt.bg = adjustcolor(Palette, alpha.f = 0.25), col = Palette,
+               bty = 'n')
+        
       }
     }
     # ================ #
     # GOODNESS OF FIT: 
     # ================ #
-  } else {
+  } else if (plot.type == "gof") {
     ncat <- length(x$surv)
     catname <- names(x$surv)
     pcol <- ceiling(ncat / 2)
@@ -1282,26 +1287,26 @@ plot.basta <- function(x, plot.type = "traces", trace.name = "theta",
     prow <- ncat
     
     par(mfrow = c(prow, pcol), mar = c(4, 4, 1, 1)) 
-    for (nta in 1:ncat) {
+    for (icat in 1:ncat) {
       ylim <- c(0, 1)
       xlim <- c(0, 0)
       minAge <- as.numeric(x$modelSpecs["min. age"])
       if (is.null(minSurv)) {
-        cuts <- x$cuts[[nta]]
+        cuts <- x$cuts[[icat]]
       } else {
-        cuts <- which(x$surv[[nta]][1, ] >= minSurv)
+        cuts <- which(x$surv[[icat]][1, ] >= minSurv)
       }
       if (! "xlim" %in% names(args)) {
         xlim <- range(c(xlim, x$x[cuts] + minAge), na.rm = TRUE)
       } else {
         xlim <- args$xlim
       }
-      if (is.data.frame(x$lifeTable[[nta]])) {
-        lifeTab <- x$lifeTable[[nta]]
+      if (is.data.frame(x$lifeTable[[icat]])) {
+        lifeTab <- x$lifeTable[[icat]]
         PLE <- FALSE
       } else {
-        lifeTab <- x$lifeTable[[nta]]$Mean
-        ple <- x$lifeTable[[nta]]$ple
+        lifeTab <- x$lifeTable[[icat]]$Mean
+        ple <- x$lifeTable[[icat]]$ple
         PLE <- TRUE
       }
       minAge <- as.numeric(x$modelSpecs["min. age"])
@@ -1309,16 +1314,16 @@ plot.basta <- function(x, plot.type = "traces", trace.name = "theta",
       ltMinAge <- lifeTab$Ages[idAges[1]]
       
       # Survival:
-      if (catname[nta] == "nocov") {
+      if (catname[icat] == "nocov") {
         main <- ""
       } else {
-        main <- catname[nta]
+        main <- catname[icat]
       }
       plot(xlim, ylim, col = NA, xlab = "Age", ylab = "Survival", 
            main = main)
       if (minAge > 0) lines(rep(minAge, 2), ylim, lty = 2, col = 'orange')
       nn <- 0
-      yy <- x$surv[[nta]][, cuts]
+      yy <- x$surv[[icat]][, cuts]
       xx <- x$x[cuts]
       if (ltMinAge > minAge) {
         idxx <- which(xx + minAge >= ltMinAge)
@@ -1357,14 +1362,14 @@ plot.basta <- function(x, plot.type = "traces", trace.name = "theta",
       }
       lines(xx + minAge, yy[1, ], lwd = lwdd, col = Palette[1], 
             lty = ltyy)
-      if (nta == ncat) {
+      if (icat == ncat) {
         legend('topright', c("Life table", "Estimated"), 
                col = c(1, Palette[1]), lwd = 2, bty = 'n', pch = c(19, NA))
       }
       
       # Mortality:
       xx <- x$x[cuts]
-      yy <- x$mort[[nta]][, cuts]
+      yy <- x$mort[[icat]][, cuts]
       dxLt <- diff(lifeTab$Ages[1:2])
       # ======= BUG 2023-10-19 ========= #
       # ltMu <- -log(1 - lifeTab$qx)
@@ -1389,11 +1394,134 @@ plot.basta <- function(x, plot.type = "traces", trace.name = "theta",
       # ================================ #
       
     }
+  } else if (plot.type == "fancy") {
+    allThetaNames <- c("a0", "a1", "c", "b0", "b1", "b2")
+    allThetaExpr  <- expression(italic(a[0]), italic(a[1]), italic(c), 
+                                italic(b[0]), italic(b[1]), italic(b[2]))
+    parNames <- substr(colnames(x$params), 1, 2)
+    idTh <- which(is.element(substr(parNames, 1, 1), c("a", "b", "c")))
+    thetaMat <- x$params[,idTh]
+    model <- as.character(x$modelSpecs['model'])
+    shape <- as.character(x$modelSpecs['shape'])
+    
+    if (model == "EX" | model == 1) {
+      nTheta <- 1
+      idAllTheta <- 4
+    } else if (model %in% c("GO", "WE") | model %in% c(2, 3)) {
+      nTheta <- 2
+      idAllTheta <- c(4, 5)
+    }  else {
+      nTheta <- 3
+      idAllTheta <- c(4, 5, 6)
+    }
+    if (shape == "Makeham" | shape == 2) {
+      nTheta <- nTheta + 1
+      idAllTheta <- c(3, idAllTheta)
+    } else if(shape == "bathtub" | shape == 3) {
+      nTheta <- nTheta + 3
+      idAllTheta <- c(1:3, idAllTheta)
+    }
+    lows <- c(-Inf, 0, 0, -Inf, 0, 0)
+    names(lows) <- allThetaNames
+    
+    # Mortality ylim:
+    ylimm <- c(0, NA)
+    for (icat in 1:lenCat) {
+      ylimm[2] <- max(c(ylimm[2], x$mort[[icat]][, x$cuts[[icat]]]), 
+                      na.rm = TRUE)
+    }
+    ylimm[2] <- ceiling(ylimm[2] * 10) / 10
+    
+    # Demo variable labels:
+    demLab <- c(surv = expression(paste("Survival, ", italic(S(x)))),
+                mort = expression(paste("Mortality, ", italic(mu(x)))))
+    
+    # Build plots:  
+    layout(mat = matrix(data = c(rep(1:nTheta, each = 2), 
+                                 rep(rep(c(nTheta + 1, nTheta + 2), 
+                                         each = nTheta), 2)), 
+                        nrow  = nTheta * 2, 
+                        ncol  = 3), 
+           widths  = rep(2, 3), 
+           heights = rep(1, nTheta))
+    par(mar=c(3, 3, 0.5, 0.5))
+    for(i in 1:nTheta) {
+      dez <- list()
+      ylz <- rep(NA, lenCat)
+      xlz <- matrix(0, lenCat, 2)
+      for(j in 1:lenCat){
+        idth <- paste(allThetaNames[idAllTheta[i]],
+                      catNames[j], sep = ".")
+        if (lenCat == 1) {
+          idth <- allThetaNames[idAllTheta[i]]
+        }
+        dez[[catNames[j]]] <- density(thetaMat[, idth])
+        ylz[j] <- max(dez[[catNames[j]]]$y)
+        #xlz[j,] <- range(dez[[j]]$x)
+        xlz[j, ] <- quantile(thetaMat[, idth], c(0.01, 0.99))
+      }
+      xr <- range(xlz)
+      xl <- c(floor(max(c(lows[idAllTheta[i]], xr[1])) * 10) / 10, 
+              ceiling(xr[2] * 10) / 10)
+      xd <- ceiling(diff(xl) * 10) / 10
+      plot(x = dez[[1]], xlab = "", ylab = "", xlim = xl, ylim = c(0, max(ylz)), 
+           lwd = 3, axes = FALSE, main = "", col = NA)
+      for(icat in 1:lenCat) {
+        polygon(x = c(dez[[icat]]$x, dez[[icat]]$x[1]), 
+                y = c(dez[[icat]]$y, dez[[icat]]$y[1]), 
+                col = adjustcolor(Palette[icat], alpha.f = 0.25), 
+                border = Palette[icat], lwd = 1.5)
+      }
+      axis(side = 1, at = seq(xl[1], xl[2], length = 5), 
+           line = 0.5, labels = NA, tcl = 0.4)
+      axis(side = 1, at = seq(xl[1], xl[2], length = 3), lwd = NA)
+      mtext(text = allThetaExpr[idAllTheta[i]], side = 2, line = 0, 
+            at = max(ylz) * 0.8, las = 2, cex = 1.25)
+    }
+    
+    # Plot survival probability:
+    par(mar = c(4, 7, 0.5, 0.5))
+    xv <- lapply(1:lenCat, function(idcovs) x$x[x$cuts[[idcovs]]])
+    mxv <- ceiling(max(unlist(xv)) / 5) * 5
+    
+    for (idem in c("mort", "surv")) {
+      if (idem == "surv") {
+        ylmx <- c(0, 1)
+      } else {
+        ylmx <- ylimm
+      }
+      plot(x = c(0, mxv), y = ylmx, col = NA, axes = FALSE, xlab = "", 
+           ylab = "")
+      for(icat in 1:lenCat) {
+        xx <- x$x[x$cuts[[icat]]]
+        yy <- x[[idem]][[icat]][, x$cuts[[icat]]]
+        polygon(x = c(xx, rev(xx)), 
+                y = c(yy[2, ], rev(yy[3, ])), 
+                col = adjustcolor(Palette[icat], alpha.f = 0.25), 
+                border = Palette[icat])
+        lines(x = xx, y = yy[1, ], col = Palette[icat], lty = 3)
+      }
+      if (lenCat > 1 & idem == "surv") {
+        legend(x = 'topright', legend = legNames, 
+               pch = 22, pt.cex = 3, cex = 1.5, 
+               pt.bg = adjustcolor(Palette, alpha.f = 0.25), col = Palette,
+               bty = 'n')
+      }
+      
+      axis(side = 2, at = seq(0, 1, 0.2), tcl = 0.4, las = 2, cex.axis = 1.2)
+      mtext(text = demLab[idem], side = 2, line = 3.5, cex = 1.25)
+      if (idem == "mort") {
+        axis(side = 1, at = seq(0, mxv, 5), labels = NA, tcl = 0.4, line = 0.5)
+      } else {
+        axis(side = 1, at = seq(0, mxv, 5), tcl = 0.4, line = 0.5)
+        mtext(text = expression(paste("Age ", italic(x), " (years)")), 
+              side = 1, cex = 1.25, line = 3) 
+      }
+    }
   }
 }
 
-# A.4) Printing BaSTA outputs:
-# ---------------------------- #
+# Printing:
 print.basta <- function(x, ...) {
   extraArgs <- list(...)
   if (length(extraArgs) > 0) {
@@ -1428,8 +1556,7 @@ print.basta <- function(x, ...) {
   }
 }
 
-# A.5) Summary for BaSTA outputs:
-# ------------------------------- #
+# Summary:
 summary.basta <- function(object, ...){
     extraArgs       <- list(...)
     if (length(extraArgs) > 0) {
@@ -1530,7 +1657,8 @@ summary.basta <- function(object, ...){
     return(invisible(ans))
   }
 
-# A.6) construct capture-recapture matrix:
+# A.4) construct capture-recapture matrix:
+# ---------------------------------------- #
 CensusToCaptHist <- function(ID, d, dformat = "%Y", timeInt = "Y") {
   # Check data
   if(!inherits(ID, "character")) {
@@ -1587,6 +1715,155 @@ CensusToCaptHist <- function(ID, d, dformat = "%Y", timeInt = "Y") {
   dmat <- data.frame(ID = uniID, mat)
   
   return(dmat)
+}
+
+# A.7) Multi-BaSTA functions:
+# --------------------------- #
+# Main multibasta:
+multibasta <- function(object, dataType = "CMR", models, 
+                       shapes, ...) {
+  # Extract arguments:
+  argList <- list(...)
+  argNames <- names(argList)
+  print(argNames)
+  
+  # Models available:
+  mods <- rbind(data.frame(model = "EX", shape = "simple"),
+                expand.grid(model = c("GO", "WE", "LO"), 
+                            shape = c("simple", "Makeham", "bathtub")))
+  
+  # Abreviations for models and shapes:
+  modsAbr <- rbind(data.frame(model = "Ex", shape = "Si"),
+                   expand.grid(model = c("Go", "We", "Lo"), 
+                               shape = c("Si", "Ma", "Bt")))
+  
+  # Alternative is models and shape are missing (i.e. run all):
+  if (missing(models)) models <- c("EX", "GO", "WE", "LO")
+  if (missing(shapes)) shapes <- c("simple", "Makeham", "bathtub")
+  
+  # Models request by user:
+  idIncl <- which(mods$model %in% models & mods$shape %in% shapes)
+  mods <- mods[idIncl, ]
+  modsAbr <- modsAbr[idIncl, ]
+  nmod <- nrow(mods)
+  modNames <- paste(modsAbr$model, modsAbr$shape, sep = ".")
+
+  # Define nsim:
+  if (!"nsim" %in% argNames) {
+    argList$nsim <- 2
+  }
+  
+  # Logical whether DICs can be calculated:
+  if (argList$nsim > 1) DIC <- TRUE else DIC <- FALSE
+  
+  # DIC matrix:
+  if (DIC) {
+    dics <- matrix(NA, nmod, 5, dimnames = 
+                     list(modNames, c("D.ave", "D.mode", "pD", "k", "DIC")))
+  }
+  
+  # list for models ran:
+  runList <- list()
+  
+  # Run models:
+  for (mod in 1:nmod) {
+    updt <- sprintf("Run number %s, model: %s", mod, modNames[mod])
+    cat(paste("\n", paste(rep("-", nchar(updt)), collapse = ""), sep = ""))
+    cat(sprintf("\n%s\n", updt))
+    cat(paste(paste(rep("-", nchar(updt)), collapse = ""), "\n", sep = ""))
+    out <- basta(object, dataType = dataType, model = mods$model[mod], 
+                 shape = mods$shape[mod], ...)
+    runList[[modNames[mod]]] <- out
+    if (DIC & out$DIC[1] != "Not calculated") {
+      dics[mod, ] <- out$DIC
+    }
+  }
+  
+  # Fill up DIC matrix:
+  if (DIC) {
+    idNa <- which(is.na(dics[, "DIC"]))
+    idnNa <- which(!is.na(dics[, "DIC"]))
+    idModFit <- c(idnNa[sort.int(dics[idnNa, 5], index.return = TRUE)$ix], 
+                  idNa)
+    if (is.na(idModFit[1])) idModFit <- 0
+    modFit <- data.frame(mods, dics)[idModFit, ]
+    DICdiff <- modFit$DIC - modFit$DIC[1]
+    Rank <- 1:nmod
+    modFit <- data.frame(modFit, DICdiff, Rank)
+  } else {
+    modFit <- data.frame(DICs = "Not Calculated")
+    idModFit <- NA
+  }
+  
+  # Results list:
+  results <- list(runs = runList[idModFit], DICs = modFit, models = mods)
+  class(results) <- "multibasta"
+  return(results)
+}
+
+# Printing:
+print.multibasta <- function(x, ...) {
+  argList <- list(...)
+  if (is.null(argList$digits)) digits <- 3 else digits <- argList$digits
+  cat("\nDICs:\n")
+  print(x$DICs, digits = digits)
+}
+
+# Summary:
+summary.multibasta <- function(object, ...) {
+  argList <- list(...)
+  if (is.null(argList$digits)) digits <- 3 else digits <- argList$digits
+  if ("version" %in% names(object$runs[[1]])) {
+    cat(sprintf("\nBaSTA version %s\n", object$runs[[1]]$version))
+  }
+  
+  cat("\nCall:\n")
+  cat(paste("Covars. structure \t\t: ", object$runs[[1]]$modelSpecs[3], "\n", 
+            sep = ""))
+  cat(paste("Minimum age       \t\t: ", object$runs[[1]]$modelSpecs[4], "\n", 
+            sep = ""))
+  cat(paste("Cat. covars.      \t\t: ", object$runs[[1]]$modelSpecs[5], "\n", 
+            sep = ""))
+  cat(paste("Cont. covars.     \t\t: ", object$runs[[1]]$modelSpecs[6], "\n", 
+            collapse = ""))
+  
+  cat("\nModel settings:\n")
+  print(object$runs[[1]]$set)
+  
+  cat("\nDICs:\n")
+  print(object$DICs, digits = digits)
+}
+
+# Extract coefficients:
+coef.multibasta <- function(object, showAll = FALSE, ...) {
+  argList <- list(...)
+  if (is.null(argList$digits)) digits <- 3 else digits <- argList$digits
+  ans <- list()
+  if (inherits(showAll,  "logical")) {
+    if (showAll) nmod <- 1:length(object$runs) else nmod <- 1
+  } else if (inherits(showAll, "numeric")) {
+    if (length(showAll) == 1) {
+      nmod <- 1:showAll
+    } else {
+      nmod <- showAll
+    }
+    nmod <- nmod[nmod <= length(object$runs)]
+  } else {
+    stop("\nArgument 'showAll' should be logical or an integer.\n", 
+         call. = FALSE)
+  }
+  modNames <- names(object$runs)
+  for (mod in nmod) {
+    updt <- sprintf("DIC rank %s, model: %s", as.character(object$DICs$Rank)[mod], 
+                    modNames[mod])
+    cat(paste("\n", paste(rep("-", nchar(updt)), collapse = ""), sep = ""))
+    cat(sprintf("\n%s\n", updt))
+    cat(paste(paste(rep("-", nchar(updt)), collapse = ""), "\n", sep = ""))
+    print.default(object$runs[[mod]]$coefficients, digits = digits)
+    ans$coefficients[[modNames[mod]]] <- object$runs[[mod]]$coefficients
+  }
+  ans$DICs <- object$DICs
+  return(invisible(ans))
 }
 
 # ============================================ #
@@ -3489,8 +3766,10 @@ CensusToCaptHist <- function(ID, d, dformat = "%Y", timeInt = "Y") {
   # Create initial age object:
   ageNow <- ageObj
   
+  # Reset the random seed: 
+  runif(sim)
+  
   # Create intial parameters:
-  rm(".Random.seed", envir = .GlobalEnv); runif(1)
   parNow <- .JitterPars(parObj, fullParObj, ageObj, dataObj)
   parCovNow <- .CalcCovPars(parObj = parNow, parCov = NULL, 
                             covObj = covObj, dataObj = dataObj, 
@@ -3517,7 +3796,6 @@ CensusToCaptHist <- function(ID, d, dformat = "%Y", timeInt = "Y") {
                          parObj = parNow, dataObj = dataObj, ageObj = ageNow, 
                          covObj = covObj, priorAgeObj = priorAgeObj, 
                          .CalcSurv, .CalcSurv.numeric, .CalcSurv.matrix)
-  # cat("2323, ")
   if (UpdJumps) {
     # Start jumps for Metropolis algorithm:
     niter <- 7500
@@ -3562,7 +3840,6 @@ CensusToCaptHist <- function(ID, d, dformat = "%Y", timeInt = "Y") {
   updCount <- parObj
   for (iup in 1:length(updCount)) updCount[[iup]] <- updCount[[iup]] * 0
   
-  # cat("2358, ")
   # Start MCMC:
   for (iter in 1:niter) {
     for (tg in c("theta", 'gamma', "lambda")) {
@@ -3602,7 +3879,7 @@ CensusToCaptHist <- function(ID, d, dformat = "%Y", timeInt = "Y") {
         }
       }
     }
-    # if (iter == 2) cat("2390, ")
+
     # Sample recapture probabilities:
     if (inherits(dataObj, "bastacmr")) {
       parNow <- .SamplePars(parNow, parJumps, fullParObj, dataObj, 
@@ -3622,7 +3899,6 @@ CensusToCaptHist <- function(ID, d, dformat = "%Y", timeInt = "Y") {
                            ind = dataObj$idNoA, .CalcSurv, .CalcSurv.numeric, 
                            .CalcSurv.matrix)
     }
-    # if (iter == 2) cat("2401, ")
     
     # Sample ages:
     if (dataObj$updA) {
@@ -3689,8 +3965,7 @@ CensusToCaptHist <- function(ID, d, dformat = "%Y", timeInt = "Y") {
         }
       }
     }
-    # if (iter == 2) cat("2439.\n")
-    
+
     # Fill up paramters, likelihood and posterior in output object:
     if (!UpdJumps) {
       if (iter %in% allSeq) {
@@ -3842,7 +4117,8 @@ CensusToCaptHist <- function(ID, d, dformat = "%Y", timeInt = "Y") {
     W <- 1 / algObj$nsim * apply(Vars, 2, sum)
     Varpl <- (nthin - 1) / nthin * W + 1 / nthin * B
     Rhat <- sqrt(Varpl / W)
-    Rhat[Varpl==0] <- 1
+    Rhat[which(Varpl == 0)] <- 1
+    Rhat[which(Rhat < 1)] <- 1
     conv <- cbind(B, W, Varpl, Rhat)
     rownames(conv) <- colnames(parMat)
     coeffs <- cbind(coeffs, conv[, 'Rhat'])
