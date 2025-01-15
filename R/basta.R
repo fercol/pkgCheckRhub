@@ -828,8 +828,12 @@ basta.default <- function(object, dataType = "CMR",
   # Age object:
   ageObj <- .CreateAgeObj(dataObj, algObj)
   
-  # Index of kept MCMC records:
-  keep <- seq(burnin, niter, thinning)
+  # indices of kept values:
+  outidObj <- list(all = seq(1, algObj$niter, algObj$thinning))
+  outidObj$nAll <- length(outidObj$all)
+  outidObj$idKeep <- which(outidObj$all >= algObj$burnin)
+  outidObj$keep <- outidObj$all[outidObj$idKeep]
+  outidObj$nKeep <- length(outidObj$keep)
   
   # ---------------------- #
   # Demographic functions:
@@ -879,7 +883,7 @@ basta.default <- function(object, dataType = "CMR",
   Start <- Sys.time()
   jumpRun <- .RunMCMC(1, UpdJumps = TRUE, parJumps = NA, ageObj, dataObj,
                       parObj, fullParObj, covObj, 
-                      priorAgeObj, algObj, 
+                      priorAgeObj, algObj, outidObj, 
                       .CalcMort, .CalcMort.numeric, 
                       .CalcMort.matrix, .CalcSurv, 
                       .CalcSurv.numeric, .CalcSurv.matrix,
@@ -911,7 +915,7 @@ basta.default <- function(object, dataType = "CMR",
       bastaOut <- sfClusterApplyLB(1:nsim, .RunMCMC, UpdJumps = FALSE, 
                                    parJumps = jumpRun$jumps, ageObj, dataObj,
                                    parObj, fullParObj, covObj, 
-                                   priorAgeObj, algObj, 
+                                   priorAgeObj, algObj, outidObj, 
                                    .CalcMort, .CalcMort.numeric, 
                                    .CalcMort.matrix, .CalcSurv, 
                                    .CalcSurv.numeric, .CalcSurv.matrix,
@@ -923,7 +927,7 @@ basta.default <- function(object, dataType = "CMR",
       bastaOut <- lapply(1:nsim, .RunMCMC, UpdJumps = FALSE, 
                          parJumps = jumpRun$jumps, ageObj, dataObj,
                          parObj, fullParObj, covObj, priorAgeObj, 
-                         algObj, .CalcMort, .CalcMort.numeric,
+                         algObj, outidObj, .CalcMort, .CalcMort.numeric,
                          .CalcMort.matrix, .CalcSurv, .CalcSurv.numeric,
                          .CalcSurv.matrix, .CalcCumHaz, .CalcCumHaz.numeric, 
                          .CalcCumHaz.matrix, .JitterPars)
@@ -932,7 +936,7 @@ basta.default <- function(object, dataType = "CMR",
     cat("Simulation started...\n\n")
     bastaOut <- lapply(1:nsim, .RunMCMC, UpdJumps = FALSE, 
                        parJumps = jumpRun$jumps, ageObj, dataObj, parObj, 
-                       fullParObj, covObj, priorAgeObj, algObj,
+                       fullParObj, covObj, priorAgeObj, algObj, outidObj,
                        .CalcMort, .CalcMort.numeric,
                        .CalcMort.matrix, .CalcSurv, .CalcSurv.numeric,
                        .CalcSurv.matrix, .CalcCumHaz, .CalcCumHaz.numeric, 
@@ -945,13 +949,8 @@ basta.default <- function(object, dataType = "CMR",
               units(End - Start)))
   names(bastaOut) <- paste("sim.", 1:nsim, sep = "")
   
-  # indices of kept values:
-  allKeep <- seq(1, algObj$niter, algObj$thinning)
-  keep <- which(allKeep >= algObj$burnin)
-  nKeep <- length(keep)
-  
   # Calculate summaries:
-  bastaSumars <- .ExtractParalOut(bastaOut, keep, fullParObj, covObj, 
+  bastaSumars <- .ExtractParalOut(bastaOut, outidObj, fullParObj, covObj, 
                                   covsNames, nsim, dataObj, algObj, defTheta, 
                                   .CalcMort, .CalcMort.numeric, 
                                   .CalcMort.matrix, .CalcSurv, 
@@ -1577,8 +1576,8 @@ summary.basta <- function(object, ...){
     cat("\nCall:\n")
     cat(paste("Model             \t\t: ", object$modelSpecs[1], "\n", sep = ""))
     cat(paste("Shape             \t\t: ", object$modelSpecs[2], "\n", sep = ""))
-    cat(paste("Covars. structure \t\t: ", object$modelSpecs[3], "\n", sep = ""))
-    cat(paste("Minimum age       \t\t: ", object$modelSpecs[4], "\n", sep = ""))
+    cat(paste("Minimum age       \t\t: ", object$modelSpecs[3], "\n", sep = ""))
+    cat(paste("Covars. structure \t\t: ", object$modelSpecs[4], "\n", sep = ""))
     cat(paste("Cat. covars.      \t\t: ", object$modelSpecs[5], "\n", sep = ""))
     cat(paste("Cont. covars.     \t\t: ", object$modelSpecs[6], "\n", 
               collapse = ""))
@@ -1617,7 +1616,7 @@ summary.basta <- function(object, ...){
       if (object$set['nsim'] == 1) {
         message("\nConvergence calculations require more than one run.",
             "\nTo estimate potential scale reduction run at least",
-            "two simulations.\n")
+            " two simulations.\n")
       } else {
         cat("\nWarning: Convergence not reached for some parameters",
             " (i.e. 'PotScaleReduc' values larger than 1.1).",
@@ -1725,7 +1724,6 @@ multibasta <- function(object, dataType = "CMR", models,
   # Extract arguments:
   argList <- list(...)
   argNames <- names(argList)
-  print(argNames)
   
   # Models available:
   mods <- rbind(data.frame(model = "EX", shape = "simple"),
@@ -1774,7 +1772,7 @@ multibasta <- function(object, dataType = "CMR", models,
     out <- basta(object, dataType = dataType, model = mods$model[mod], 
                  shape = mods$shape[mod], ...)
     runList[[modNames[mod]]] <- out
-    if (DIC & out$DIC[1] != "Not calculated") {
+    if (DIC & !is.na(out$DIC[1])) {
       dics[mod, ] <- out$DIC
     }
   }
@@ -2040,21 +2038,32 @@ coef.multibasta <- function(object, showAll = FALSE, ...) {
   else {
     n <- nrow(object)
     # Calculate Julian times:
-    bi <- round(as.numeric(as.Date(object$Birth.Date, 
-                                   format = "%Y-%m-%d")) / 
-                  365.25, 2) + 1970
-    bil <- round(as.numeric(as.Date(object$Min.Birth.Date, 
-                                    format = "%Y-%m-%d")) /
-                   365.25, 2) + 1970
-    biu <- round(as.numeric(as.Date(object$Max.Birth.Date, 
-                                    format = "%Y-%m-%d")) /
-                   365.25, 2) + 1970
-    firstObs <- round(as.numeric(as.Date(object$Entry.Date, 
-                                      format = "%Y-%m-%d")) /
-                     365.25, 2) + 1970
-    lastObs <- round(as.numeric(as.Date(object$Depart.Date, 
-                                       format = "%Y-%m-%d")) /
-                      365.25, 2) + 1970
+    # bi <- round(as.numeric(as.Date(object$Birth.Date, 
+    #                                format = "%Y-%m-%d")) / 
+    #               365.25, 2) + 1970
+    # bil <- round(as.numeric(as.Date(object$Min.Birth.Date, 
+    #                                 format = "%Y-%m-%d")) /
+    #                365.25, 2) + 1970
+    # biu <- round(as.numeric(as.Date(object$Max.Birth.Date, 
+    #                                 format = "%Y-%m-%d")) /
+    #                365.25, 2) + 1970
+    # firstObs <- round(as.numeric(as.Date(object$Entry.Date, 
+    #                                   format = "%Y-%m-%d")) /
+    #                  365.25, 2) + 1970
+    # lastObs <- round(as.numeric(as.Date(object$Depart.Date, 
+    #                                    format = "%Y-%m-%d")) /
+    #                   365.25, 2) + 1970
+
+    bi <- as.numeric(as.Date(object$Birth.Date, 
+                             format = "%Y-%m-%d")) / 365.25 + 1970
+    bil <- as.numeric(as.Date(object$Min.Birth.Date, 
+                              format = "%Y-%m-%d")) / 365.25 + 1970
+    biu <- as.numeric(as.Date(object$Max.Birth.Date, 
+                              format = "%Y-%m-%d")) / 365.25 + 1970
+    firstObs <- as.numeric(as.Date(object$Entry.Date, 
+                                   format = "%Y-%m-%d")) / 365.25 + 1970
+    lastObs <- as.numeric(as.Date(object$Depart.Date, 
+                                  format = "%Y-%m-%d")) / 365.25 + 1970
     
     # Entry and departure types:
     entryType <- as.character(object$Entry.Type)
@@ -3677,7 +3686,8 @@ coef.multibasta <- function(object, showAll = FALSE, ...) {
 # --------------------------- #
 # Function to create output and jumps matrices:
 .CreateMCMCoutObj <- function(fullParObj, dataObj, algObj, parObj, ageObj,
-                              likeObj, postObj, type = "mcmc", matrows) {
+                              likeObj, postObj, outidObj,
+                              type = "mcmc", matrows) {
   McmcOutObj <- list()
   # Create matrices for parameters:
   # matrows <- ifelse(type == "mcmc", algObj$niter, algObj$burnin)
@@ -3698,17 +3708,16 @@ coef.multibasta <- function(object, showAll = FALSE, ...) {
                                 type = type)
   # Fill up initial values:
   if (type == "mcmc") {
-    nkeep <- ceiling((algObj$niter - algObj$burnin) / algObj$thinning)
     # Create matrices for unknown births and deaths:
     if (dataObj$updB) {
-      McmcOutObj$B <- matrix(0, nkeep, dataObj$nUpdB)
+      McmcOutObj$B <- matrix(0, outidObj$nKeep, dataObj$nUpdB)
       # McmcOutObj$B[1, ] <- ageObj$ages[dataObj$idNoB, "birth"]
     } else {
       McmcOutObj$B <- NA
     }
     if (inherits(dataObj, "bastacmr")) {
       if (dataObj$updD) {
-        McmcOutObj$D <- matrix(0, nkeep, dataObj$nUpdD)
+        McmcOutObj$D <- matrix(0, outidObj$nKeep, dataObj$nUpdD)
         # McmcOutObj$D <- ageObj$ages[dataObj$idNoD, "death"]
       } else {
         McmcOutObj$D <- NA
@@ -3758,7 +3767,7 @@ coef.multibasta <- function(object, showAll = FALSE, ...) {
 # MCMC function:
 # -------------- #
 .RunMCMC <- function(sim, UpdJumps = TRUE, parJumps = NA, ageObj, dataObj,
-                     parObj, fullParObj, covObj, priorAgeObj, algObj,
+                     parObj, fullParObj, covObj, priorAgeObj, algObj, outidObj, 
                      .CalcMort, .CalcMort.numeric, .CalcMort.matrix, 
                      .CalcSurv, .CalcSurv.numeric, .CalcSurv.matrix,
                      .CalcCumHaz, .CalcCumHaz.numeric, 
@@ -3822,15 +3831,12 @@ coef.multibasta <- function(object, showAll = FALSE, ...) {
     niter <- algObj$niter
     burnin <- algObj$burnin
     thinning <- algObj$thinning
-    thinSeq <- seq(burnin, niter, thinning)
-    allSeq <- seq(1, niter, thinning)
-    matrows <- length(allSeq)
-    
+
     # Create MCMC output object:
     McmcOutObj <- .CreateMCMCoutObj(fullParObj, dataObj, algObj, 
                                     parObj = parNow, ageNow, likeNow, 
-                                    postNow, type = "mcmc", 
-                                    matrows = matrows)
+                                    postNow, outidObj, type = "mcmc", 
+                                    matrows = outidObj$nAll)
     
     # Counter for updated ages:
     indAge <- 0
@@ -3957,7 +3963,7 @@ coef.multibasta <- function(object, showAll = FALSE, ...) {
       
       # Fill up paramters in output object:
       if (!UpdJumps) {
-        if (iter %in% thinSeq) {
+        if (iter %in% outidObj$keep) {
           indAge <- indAge + 1
           McmcOutObj <- .FillMCMCoutObj(McmcOutObj, parNow, dataObj, ageNow,
                                         likeNow, postNow, iter = indAge,
@@ -3968,7 +3974,7 @@ coef.multibasta <- function(object, showAll = FALSE, ...) {
 
     # Fill up paramters, likelihood and posterior in output object:
     if (!UpdJumps) {
-      if (iter %in% allSeq) {
+      if (iter %in% outidObj$all) {
         indPars <- indPars + 1
         McmcOutObj <- .FillMCMCoutObj(McmcOutObj, parNow, dataObj, ageNow,
                                       likeNow, postNow, iter = indPars,
@@ -4019,17 +4025,17 @@ coef.multibasta <- function(object, showAll = FALSE, ...) {
 # ===================================== #
 # Extract thinned sequences from multiple runs, calculate coefficients,
 # DIC and quantiles for mortality, survival, summary statistics and ages:
-.ExtractParalOut <- function(bastaOut, keep, fullParObj, covObj, covsNames, 
+.ExtractParalOut <- function(bastaOut, outidObj, fullParObj, covObj, covsNames, 
                              nsim, dataObj, algObj, defTheta, .CalcMort, 
                              .CalcMort.numeric, .CalcMort.matrix, 
                              .CalcSurv, .CalcSurv.matrix, 
                              .CalcSurv.numeric) {
   cat("Calculating summary statistics...")
-  nthin <- length(keep)
-  parMat <- bastaOut[[1]]$theta[keep, ]
+  nthin <- outidObj$nKeep
+  parMat <- bastaOut[[1]]$theta[outidObj$idKeep, ]
   parnames <- fullParObj$theta$names
   idTheta <- 1:ncol(bastaOut[[1]]$theta)
-  likePost <- bastaOut[[1]]$likePost[keep, ]
+  likePost <- bastaOut[[1]]$likePost[outidObj$idKeep, ]
   updVec <- c(bastaOut[[1]]$update$theta)
   updTot <- (algObj$niter - algObj$burnin + 1) * algObj$nsim
   
@@ -4045,17 +4051,17 @@ coef.multibasta <- function(object, showAll = FALSE, ...) {
   
   # Parameter matrices:
   if (covsNames$class %in% c("propHaz", "fused")) {
-    parMat <- cbind(parMat, bastaOut[[1]]$gamma[keep, ])
+    parMat <- cbind(parMat, bastaOut[[1]]$gamma[outidObj$idKeep, ])
     parnames <- c(parnames, fullParObj$gamma$names)
     updVec <- c(updVec, bastaOut[[1]]$update$gamma)
   }
   if (inherits(fullParObj, "lambda")) {
-    parMat <- cbind(parMat, bastaOut[[1]]$lambda[keep])
+    parMat <- cbind(parMat, bastaOut[[1]]$lambda[outidObj$idKeep])
     parnames <- c(parnames, "lambda")
     updVec <- c(updVec, bastaOut[[1]]$update$lambda)
   }
   if (inherits(fullParObj, "pi")) {
-    parMat <- cbind(parMat, bastaOut[[1]]$pi[keep, ])
+    parMat <- cbind(parMat, bastaOut[[1]]$pi[outidObj$idKeep, ])
     parnames <- c(parnames, fullParObj$pi$names)
     updVec <- c(updVec, bastaOut[[1]]$update$pi)
   }
@@ -4069,18 +4075,18 @@ coef.multibasta <- function(object, showAll = FALSE, ...) {
         t(bastaOut[[sim]]$D)
     }
     if (sim > 1) {
-      pmat <- bastaOut[[sim]]$theta[keep, ]
+      pmat <- bastaOut[[sim]]$theta[outidObj$idKeep, ]
       tempUpd <- c(bastaOut[[sim]]$update$theta)
       if (inherits(fullParObj, "theGam")) {
-        pmat <- cbind(pmat, bastaOut[[sim]]$gamma[keep, ])
+        pmat <- cbind(pmat, bastaOut[[sim]]$gamma[outidObj$idKeep, ])
         tempUpd <- c(tempUpd, bastaOut[[sim]]$update$gamma)
       }
       if (inherits(fullParObj, "lambda")) {
-        pmat <- cbind(pmat, bastaOut[[sim]]$lambda[keep])
+        pmat <- cbind(pmat, bastaOut[[sim]]$lambda[outidObj$idKeep])
         tempUpd <- c(tempUpd, bastaOut[[sim]]$update$lambda)
       }
       if (inherits(fullParObj, "pi")) {
-        pmat <- cbind(pmat, bastaOut[[sim]]$pi[keep, ])
+        pmat <- cbind(pmat, bastaOut[[sim]]$pi[outidObj$idKeep, ])
         tempUpd <- c(tempUpd, bastaOut[[sim]]$update$pi)
       }
       
@@ -4090,7 +4096,7 @@ coef.multibasta <- function(object, showAll = FALSE, ...) {
         parMat <- c(parMat, pmat)
         parMat <- matrix(parMat, ncol = 1)
       }
-      likePost <- rbind(likePost, bastaOut[[sim]]$likePost[keep, ])
+      likePost <- rbind(likePost, bastaOut[[sim]]$likePost[outidObj$idKeep, ])
       updVec <- updVec + tempUpd
     }
   }
@@ -4608,9 +4614,14 @@ coef.multibasta <- function(object, showAll = FALSE, ...) {
   # Number of records:
   n <- length(ageLast)
 
+  # Avoid minor rounding errors:
+  ageLast <- round(ageLast, 8)
+  
   # Set age first to 0 if NULL:
   if (is.null(ageFirst)) {
     ageFirst <- rep(0, n)
+  } else {
+    ageFirst <- round(ageFirst, 8)
   }
 
   # ------------------------ #
@@ -4624,10 +4635,10 @@ coef.multibasta <- function(object, showAll = FALSE, ...) {
   ageLastb[idsame] <- ageLast[idsame] + 1/365.25
 
   # Sort ages:
-  idsort <- sort.int(ageLast, index.return = TRUE)$ix
+  idsort <- sort.int(ageLastb, index.return = TRUE)$ix
 
   # Create new age vector (sorted):
-  agev <- ageLastb[idsort]
+  agev <- unique(ageLastb[idsort])
 
   # Number of ages:
   nage <- length(agev)
@@ -4640,7 +4651,8 @@ coef.multibasta <- function(object, showAll = FALSE, ...) {
   for (ii in 1:nage) {
     idNx <- which(ageFirst <= agev[ii] & ageLastb >= agev[ii])
     Cx[ii] <- length(idNx)
-    if (departType[idsort[ii]] == "D") delx[ii] <- 1
+    idd <- which(ageLastb == agev[ii] & departType == "D")
+    delx[ii] <- length(idd)
   }
 
   # Calculate product limit estimator:
