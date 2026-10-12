@@ -2,8 +2,8 @@
 # Functions to analyse mortality from capture-mark-recapture (CMR)
 # or from census data 
 # Name:        basta.R
-# Date:        2022-10-05
-# Version:     2.0
+# Date:        2026-01-29
+# Version:     2.0.3
 # Created by:  Fernando Colchero
 # Modified by: Fernando Colchero
 
@@ -15,6 +15,8 @@
 # - Allow the CMR part of the package to have Min. and Max. Birth dates
 # - Allow the CMR part to have times of censoring before the end of the 
 #   study.
+# - Added the Gavrilov and Gavrilova (2001) reliability model (b0 = b, 
+#   b1 = m, b2 = n).
 
 # List of names to change:
 # ------------------------ #
@@ -131,9 +133,9 @@ DataCheck <- function(object, dataType = "CMR", studyStart = NULL,
     }
     if (!silent) {
       if (stopExec) {
-        cat("Problems were detected with the data\nYou can use function FixCMRdata() to resolve issues.\n\n")
+        warning("problems were detected with the data, use function FixCMRdata() to resolve issues")
       } else {
-        cat("No problems were detected with the data.\n\n")
+        message("No problems were detected with the data.")
       }
     }
     
@@ -286,7 +288,7 @@ DataCheck <- function(object, dataType = "CMR", studyStart = NULL,
     # Output:
     class(prbList) <- "bastaCheckCens"
   } else {
-    stop("Wrong 'dataType' specified. Options are 'CMR' and 'census'.")
+    stop("wrong 'dataType' specified, options are 'CMR' and 'census'")
   }
   return(prbList)
 }
@@ -756,13 +758,11 @@ basta.default <- function(object, dataType = "CMR",
                           model = "GO", shape = "simple", 
                           studyStart = NULL, studyEnd = NULL, minAge = 0,
                           covarsStruct = "fused", formulaMort = NULL, 
-                          formulaRecap = NULL, recaptTrans = studyStart, 
-                          niter = 22000, burnin = 2001, thinning = 40, 
-                          nsim = 1, parallel = FALSE, ncpus = 2, 
-                          updateJumps = TRUE, negSenescence = FALSE, ...) {
-  # Create BaSTA environment:
-  # bastaenv <- new.env()
-  
+                          randEffs = NULL, formulaRecap = NULL, 
+                          recaptTrans = studyStart, niter = 22000, 
+                          burnin = 2001, thinning = 40, nsim = 1, 
+                          parallel = FALSE, ncpus = 2, updateJumps = TRUE, 
+                          negSenescence = FALSE, ...) {
   # Additional arguments:
   argList <- list(...)
   
@@ -770,8 +770,7 @@ basta.default <- function(object, dataType = "CMR",
   # dcheck <- DataCheck(object, silent = TRUE)
   dcheck <- list(stopExec = FALSE)
   if (dcheck$stopExec) {
-    stop("\nProblems detected with the data.\n", 
-         "Use DataCheck() to find problems.", call. = FALSE)
+    stop("problems detected with the data, use function DataCheck() to find problems", call. = FALSE)
   }
   
   # Variables to pass to all cpus:
@@ -789,7 +788,7 @@ basta.default <- function(object, dataType = "CMR",
   algObj <- .CreateAlgObj(dataType, model, shape, studyStart, studyEnd, 
                           minAge, covarsStruct, formulaMort, formulaRecap, 
                           recaptTrans, niter, burnin, thinning, updateJumps,
-                          nsim, negSenescence)
+                          nsim, negSenescence, randEffs)
   
   # Dataset object:
   dataObj <- .CreateDataObj(object, algObj)
@@ -879,7 +878,7 @@ basta.default <- function(object, dataType = "CMR",
   # ----------------------- #
   # Run MCMC to find jumps:
   # ----------------------- #
-  cat("\nRunning sequence to find jump SDs... ")
+  message("Running sequence to find jump SDs... ", appendLF = FALSE)
   Start <- Sys.time()
   jumpRun <- .RunMCMC(1, UpdJumps = TRUE, parJumps = NA, ageObj, dataObj,
                       parObj, fullParObj, covObj, 
@@ -890,7 +889,7 @@ basta.default <- function(object, dataType = "CMR",
                       .CalcCumHaz, .CalcCumHaz.numeric, 
                       .CalcCumHaz.matrix, .JitterPars)
   End <- Sys.time()
-  cat("Done\n")
+  message(" Done.")
   compTime <- round(as.numeric(End-Start, units = units(End - Start)), 2)
   cat(sprintf("Total jump SDs computing time: %.2f %s.\n\n", compTime, 
               units(End - Start)))
@@ -901,15 +900,10 @@ basta.default <- function(object, dataType = "CMR",
   # -------------- #
   Start <- Sys.time()
   if (nsim > 1) {
-    cat("Multiple simulations started...\n\n") 
+    message("Multiple simulations started...") 
     if (parallel) {
       sfInit(parallel = TRUE, cpus = ncpus)
       sfExport(list = c(intVars, ".Random.seed"))
-      # if (Sys.info()[4] == "ADM-130757-Mac") {
-      #   sfSource(file = "/Users/colchero/FERNANDO/PROJECTS/4.PACKAGES/BaSTA2.0/tests/sourceBaSTA.R")
-      # } else {
-      #   sfSource(file = "/Users/fernando/FERNANDO/PROJECTS/4.PACKAGES/BaSTA2.0/tests/sourceBaSTA.R")
-      # }
       sfLibrary("BaSTA", character.only = TRUE,
       warn.conflicts = FALSE)
       bastaOut <- sfClusterApplyLB(1:nsim, .RunMCMC, UpdJumps = FALSE, 
@@ -933,7 +927,7 @@ basta.default <- function(object, dataType = "CMR",
                          .CalcCumHaz.matrix, .JitterPars)
     }
   } else {
-    cat("Simulation started...\n\n")
+    message("Simulation started...")
     bastaOut <- lapply(1:nsim, .RunMCMC, UpdJumps = FALSE, 
                        parJumps = jumpRun$jumps, ageObj, dataObj, parObj, 
                        fullParObj, covObj, priorAgeObj, algObj, outidObj,
@@ -943,7 +937,7 @@ basta.default <- function(object, dataType = "CMR",
                        .CalcCumHaz.matrix, .JitterPars)
   }
   End <- Sys.time()
-  cat("Simulations finished.\n")
+  message("Simulations finished.")
   compTime <- round(as.numeric(End-Start, units = units(End - Start)), 2)
   cat(sprintf("Total MCMC computing time: %.2f %s.\n\n", compTime, 
               units(End - Start)))
@@ -974,13 +968,24 @@ basta.default <- function(object, dataType = "CMR",
   names(bastaFinal$settings) <- c("niter", "burnin", "thinning", "nsim")
   
   # Model specifications:
-  bastaFinal$modelSpecs <- 
-    c(model, shape, minAge, covarsStruct,
-      paste(names(covObj$cat), collapse = ", "), 
-      paste(names(covObj$cont), collapse = ", "), dataType)
-  names(bastaFinal$modelSpecs) <- c("model", "shape", "min. age", 
-                                    "Covar. structure", "Categorical", 
-                                    "Continuous", "DataType")
+  modelSpecs <- 
+    c(model, shape, minAge, covarsStruct, "None", "None", "None",
+      dataType)
+  names(modelSpecs) <- c("model", "shape", "min. age", 
+                         "Covar. structure", "Categorical", 
+                         "Continuous", "Random eff.", "DataType")
+  
+  if (covObj$types["cat"]) {
+    modelSpecs["Categorical"] <- paste(names(covObj$cat), collapse = ", ")
+  }
+  if (covObj$types["cont"]) {
+    modelSpecs["Continuous"] <- paste(names(covObj$cont), collapse = ", ")
+  }
+  if (covObj$types["re"]) {
+    modelSpecs["Random eff."] <- paste(covObj$randEffs$renames, collapse = ", ")
+  }
+  bastaFinal$modelSpecs <- modelSpecs
+  
   # Life table:
   bastaFinal$lifeTable <- .CalcLifeTable(bastaFinal, covObj, algObj,
                                          dataObj)
@@ -1022,7 +1027,10 @@ plot.basta <- function(x, type = "traces", trace.name = "theta",
   
   # Wrong type:
   if (!type %in% c("traces", "densities", "demorates", "gof", "fancy")) {
-    stop("Wrong value for argument 'type'.\nAlternatives are 'traces', 'demorates', 'densities', 'gof', or 'fancy'.")
+    plTypes <- paste(dQuote(c("traces", "demorates", "densities", "gof", 
+                              "fancy")), collapse = ", ")
+    stop(gettextf("wrong value for argument 'type', alternatives are %s", 
+                  plTypes))
   }
   
   nv <- ifelse(type == "traces", x$settings['nsim'], length(x$surv))
@@ -1058,7 +1066,7 @@ plot.basta <- function(x, type = "traces", trace.name = "theta",
     
     if ("names.legend" %in% namesArgs) {
       if (length(args$names.legend) != nv) {
-        stop(sprintf("Wrong length in 'names.legend'. Correct length is %s elements.",
+        stop(gettextf("wrong length in 'names.legend', the correct length is %s elements",
                      nv), call. = FALSE)
       } else {
         legNames <- args$names.legend
@@ -1096,7 +1104,7 @@ plot.basta <- function(x, type = "traces", trace.name = "theta",
       } else if (trace.name == "gamma") {
         idpars <- grep("gamma", colnames(x$params))
         if (inherits(x$fullpar, "theta")) {
-          stop("'gamma' parameters not calculated (not propHaz).", 
+          stop("'gamma' parameters not calculated (not propHaz)", 
                call. = FALSE)
         } else {
           npar <- x$fullpar$gamma$len
@@ -1105,7 +1113,7 @@ plot.basta <- function(x, type = "traces", trace.name = "theta",
         }
       } else if (trace.name == "lambda") {
         if (inherits(x$fullpar, "noLambda")) {
-          stop("'lambda' parameters not calculated (no minAge).", 
+          stop("'lambda' parameters not calculated (no minAge)", 
                call. = FALSE)
         } else {
           pcol <- 1
@@ -1120,13 +1128,15 @@ plot.basta <- function(x, type = "traces", trace.name = "theta",
           npar <- x$fullpar$pi$len
           idpars <- grep("pi", colnames(x$params))
         } else {
-          stop("Argument 'trace.name' cannot be 'pi'.\n", 
-               "No recapture probabilities estimated, dataType is not CMR.",
+          stop(gettextf("argument 'trace.name' cannot be %s, dataType is not %s",
+                        dQuote("pi"), dQuote("CMR")),
                call. = FALSE)
         }
       } else {
-        stop("Wrong 'trace.name' specified.\n", 
-             "Names are 'theta', 'gamma', 'lambda', or 'pi'", call. = FALSE)
+        trNames <- paste(dQuote(c('theta', 'gamma', 'lambda', 'pi')), 
+                         collapse = ", ")
+        stop(gettextf("wrong 'trace.name' specified, alternatives are %s", trNames), 
+             call. = FALSE)
       }
       par (mfrow = c(prow, pcol), mar = c(4, 4, 1, 1))
       for (pp in 1:npar) {
@@ -1210,13 +1220,16 @@ plot.basta <- function(x, type = "traces", trace.name = "theta",
           prow <- ceiling(npar / pcol)
           allnpar <- x$fullpar$pi$len
         } else {
-          stop("Argument 'trace.name' cannot be 'pi'.\n", 
-               "No recapture probabilities estimated, dataType is not CMR.",
+          stop(gettextf("argument 'trace.name' cannot be %s, dataType is not %s",
+                        dQuote("pi"), dQuote("CMR")),
                call. = FALSE)
         }
       } else {
-        stop("Wrong 'trace.name' specified.\n", 
-             "Names are 'theta', 'gamma', 'lambda', or 'pi'", call. = FALSE)
+        trNames <- paste(dQuote(c('theta', 'gamma', 'lambda', 'pi')), 
+                         collapse = ", ")
+        stop(gettextf("wrong 'trace.name' specified, alternatives are %s", 
+                      trNames), call. = FALSE)
+        
       }
       keep <- seq(1, x$setting["niter"], x$settings["thinning"])
       par (mfrow = c(prow, pcol), mar = c(4, 4, 1, 1))
@@ -1552,19 +1565,40 @@ print.basta <- function(x, ...) {
   if ("ModelSpecs" %in% names(x)) {
     x$modelSpecs <- x$ModelSpecs
   }
-  cat("\nCall:\n")
-  cat(paste("Model             \t\t: ", x$modelSpecs[1], "\n", sep = ""))
-  cat(paste("Shape             \t\t: ", x$modelSpecs[2], "\n", sep = ""))
-  cat(paste("Minimum age       \t\t: ", x$modelSpecs[3], "\n", sep = ""))
-  cat(paste("Covars. structure \t\t: ", x$modelSpecs[4], "\n", sep = ""))
-  cat(paste("Cat. covars.      \t\t: ", x$modelSpecs[5], "\n", sep = ""))
-  cat(paste("Cont. covars.     \t\t: ", x$modelSpecs[6], "\n", 
-            collapse = ""))
   
+  # Print model specs:
+  if ("Random eff." %in% names(x$modelSpecs)) {
+    callDf <- data.frame(x$modelSpecs[1:7])
+    rownames(callDf) <- c("Model", "Shape", "Minimum age", "Covars. structure", 
+                          "Categ. covars.", "Cont. covars.", "Random effects")
+    
+  } else {
+    callDf <- data.frame(x$modelSpecs[1:6])
+    rownames(callDf) <- c("Model", "Shape", "Minimum age", "Covars. structure", 
+                          "Categ. covars.", "Cont. covars.")
+    
+  }
+  colnames(callDf) <- NULL
+  cat("\nCall:")
+  print(callDf, right = FALSE)  
+  
+  # Coefficients:
   cat("\nCoefficients:\n")
   print.default(x$coefficients, digits, ...)
+  
+  # Random effects:
+  if ("Random eff." %in% names(x$modelSpecs)) {
+    if (x$modelSpecs["Random eff."] != "None") {
+      cat("\nRandom Effects variances:\n")
+      print(x$randEffs$summary)
+    }
+  }
+  
+  # Convergence:
   cat("\nConvergence:\n")
   cat(x$convmessage)
+  
+  # DIC:
   if (is.na(x$DIC[1])){
     cat("\nDIC not calculated.")
   } else {
@@ -1574,104 +1608,129 @@ print.basta <- function(x, ...) {
 
 # Summary:
 summary.basta <- function(object, ...){
-    extraArgs       <- list(...)
-    if (length(extraArgs) > 0) {
-      if (!is.element('digits', names(extraArgs))){
-        digits <- 4
-      } else {
-        digits <- extraArgs$digits
-      }
-    } else {
+  # Extra arguments:
+  extraArgs <- list(...)
+  if (length(extraArgs) > 0) {
+    if (!is.element('digits', names(extraArgs))){
       digits <- 4
-    }
-    if ("ModelSpecs" %in% names(object)) {
-      object$modelSpecs <- object$ModelSpecs
-    }
-    if ("version" %in% names(object)) {
-      cat(sprintf("\nOutput from BaSTA version %s\n", object$version))
-    }
-    cat("\nCall:\n")
-    cat(paste("Model             \t\t: ", object$modelSpecs[1], "\n", sep = ""))
-    cat(paste("Shape             \t\t: ", object$modelSpecs[2], "\n", sep = ""))
-    cat(paste("Minimum age       \t\t: ", object$modelSpecs[3], "\n", sep = ""))
-    cat(paste("Covars. structure \t\t: ", object$modelSpecs[4], "\n", sep = ""))
-    cat(paste("Cat. covars.      \t\t: ", object$modelSpecs[5], "\n", sep = ""))
-    cat(paste("Cont. covars.     \t\t: ", object$modelSpecs[6], "\n", 
-              collapse = ""))
-    
-    cat("\nModel settings:\n")
-    print(object$set)
-    
-    
-    cat("\nMean Kullback-Leibler\ndiscrepancy calibration (KLDC):\n")
-    if (object$K[1] != "Not calculated") {
-      if ("qkl1" %in% names(object$K)) {
-        meanKLcalib  <- t((object$K$qkl1 + object$K$qkl2) / 2)
-      } else {
-        meanKLcalib  <- (object$K$q12 + object$K$q21) / 2
-      }
-      print.default(meanKLcalib, digits = digits)
     } else {
-      if (object$set['nsim'] == 1) {
-        cat("KLDC was not calculated due to insufficient number\n",
-            " of simulations to estimate convergence.\n")
-      } else {
-        cat("KLDC was not calculated due to lack of convergence,\n",
-            "or because covariates were not included in the model.\n")
-      }
+      digits <- extraArgs$digits
     }
-    
-    
-    cat("\nCoefficients:\n")
-    print.default(object$coefficients, digits = digits)
-    
-    cat("\nConvergence:\n")
-    if ("Convergence" %in% names(object)) {
-      object$convergence <- object$Convergence
-    }
-    if (is.null(object$convergence)) {
-      if (object$set['nsim'] == 1) {
-        message("\nConvergence calculations require more than one run.",
-            "\nTo estimate potential scale reduction run at least",
-            " two simulations.\n")
-      } else {
-        cat("\nWarning: Convergence not reached for some parameters",
-            " (i.e. 'PotScaleReduc' values larger than 1.1).",
-            "\nThese estimates should not be used for inference.\n")
-      }
-    } else {
-      if (all(object$convergence[, "Rhat"] < 1.1)) {
-        cat("Appropriate convergence reached for all parameters.\n")
-      } else {
-        cat("\nWarning: Convergence not reached for some parameters",
-            " (i.e. 'PotScaleReduc' values larger than 1.1).",
-            "\nThese estimates should not be used for inference.\n")
-      }
-    } 
-    cat("\nDIC:\n")
-    if (!is.na(object$DIC[1])){
-      cat(object$DIC["DIC"],"\n")
-      if ("Convergence" %in% names(object)) {
-        warning("Model fit in versions older than BaSTA 1.5 had a mistake in the",
-                "\ncalculation of DIC values. In case you are interested in\n",
-                "comparing the fit of different models, please try to run them\n",
-                "with BaSTA versions 1.5 or above.",
-                " We apologise for the inconvenience.", call. = FALSE)
-      }
-    } else {
-      if (object$set['nsim'] == 1) {
-        cat("DIC was not calculated due to insufficient number",
-            "of simulations to estimate convergence.\n")
-      } else {
-        cat("DIC was not calculated due to lack of convergence.\n")
-      }
-    }
-    ans <- c(list(coefficients = object$coef, DIC = object$DIC,
-                  KullbackLeibler = object$KullbackLeibler, 
-                  convergence = object$convergence,
-                  modelSpecs = object$modelSpecs, settings = object$set))
-    return(invisible(ans))
+  } else {
+    digits <- 4
   }
+  
+  # Model specifications:
+  if ("ModelSpecs" %in% names(object)) {
+    object$modelSpecs <- object$ModelSpecs
+  }
+  
+  # Version:
+  if ("version" %in% names(object)) {
+    cat(sprintf("\nOutput from BaSTA version %s\n", object$version))
+  }
+  
+  # Print model specs:
+  if ("Random eff." %in% names(object$modelSpecs)) {
+    callDf <- data.frame(object$modelSpecs[1:7])
+    rownames(callDf) <- c("Model", "Shape", "Minimum age", "Covars. structure", 
+                          "Categ. covars.", "Cont. covars.", "Random effects")
+    
+  } else {
+    callDf <- data.frame(object$modelSpecs[1:6])
+    rownames(callDf) <- c("Model", "Shape", "Minimum age", "Covars. structure", 
+                          "Categ. covars.", "Cont. covars.")
+    
+  }
+  colnames(callDf) <- NULL
+  cat("\nCall:")
+  print(callDf, right = FALSE)
+  
+  # Model settigns:
+  cat("\nModel settings:\n")
+  print(object$set)
+  
+  # Kullback-Leibler discrepancies:
+  cat("\nMean Kullback-Leibler\ndiscrepancy calibration (KLDC):\n")
+  if (object$K[1] != "Not calculated") {
+    if ("qkl1" %in% names(object$K)) {
+      meanKLcalib  <- t((object$K$qkl1 + object$K$qkl2) / 2)
+    } else {
+      meanKLcalib  <- (object$K$q12 + object$K$q21) / 2
+    }
+    print.default(meanKLcalib, digits = digits)
+  } else {
+    if (object$set['nsim'] == 1) {
+      cat("KLDC was not calculated due to insufficient number\n",
+          " of simulations to estimate convergence.\n")
+    } else {
+      cat("KLDC was not calculated due to lack of convergence,\n",
+          "or because covariates were not included in the model.\n")
+    }
+  }
+  
+  # Coefficients:
+  cat("\nCoefficients:\n")
+  print.default(object$coefficients, digits = digits)
+  
+  # Random effects:
+  if ("Random eff." %in% names(object$modelSpecs)) {
+    if (object$modelSpecs["Random eff."] != "None") {
+      cat("\nRandom Effects variances:\n")
+      print(object$randEffs$summary, digits = digits)
+    }
+  }
+  
+  # Convergence:
+  cat("\nConvergence:\n")
+  if ("Convergence" %in% names(object)) {
+    object$convergence <- object$Convergence
+  }
+  if (is.null(object$convergence)) {
+    if (object$set['nsim'] == 1) {
+      message("\nConvergence calculations require more than one run.",
+              "\nTo estimate potential scale reduction run at least",
+              " two simulations.\n")
+    } else {
+      cat("\nWarning: Convergence not reached for some parameters",
+          " (i.e. 'PotScaleReduc' values larger than 1.1).",
+          "\nThese estimates should not be used for inference.\n")
+    }
+  } else {
+    if (all(object$convergence[, "Rhat"] < 1.1)) {
+      cat("Appropriate convergence reached for all parameters.\n")
+    } else {
+      cat("\nWarning: Convergence not reached for some parameters",
+          " (i.e. 'PotScaleReduc' values larger than 1.1).",
+          "\nThese estimates should not be used for inference.\n")
+    }
+  } 
+  
+  # DIC:
+  cat("\nDIC:\n")
+  if (!is.na(object$DIC[1])){
+    cat(object$DIC["DIC"],"\n")
+    if ("Convergence" %in% names(object)) {
+      warning("Model fit in versions older than BaSTA 1.5 had a mistake in the",
+              "\ncalculation of DIC values. In case you are interested in\n",
+              "comparing the fit of different models, please try to run them\n",
+              "with BaSTA versions 1.5 or above.",
+              " We apologise for the inconvenience.", call. = FALSE)
+    }
+  } else {
+    if (object$set['nsim'] == 1) {
+      cat("DIC was not calculated due to insufficient number",
+          "of simulations to estimate convergence.\n")
+    } else {
+      cat("DIC was not calculated due to lack of convergence.\n")
+    }
+  }
+  ans <- c(list(coefficients = object$coef, DIC = object$DIC,
+                KullbackLeibler = object$KullbackLeibler, 
+                convergence = object$convergence,
+                modelSpecs = object$modelSpecs, settings = object$set))
+  return(invisible(ans))
+}
 
 # A.4) construct capture-recapture matrix:
 # ---------------------------------------- #
@@ -1682,8 +1741,7 @@ CensusToCaptHist <- function(ID, d, dformat = "%Y", timeInt = "Y") {
   } 
   if (is.numeric(d)) {
     if (length(which(round(d) != d)) > 0) {
-      stop("Please provide integer values or Date class ", 
-           "values for argument 'd'.", call. = FALSE)
+      stop(gettextf("provide integer values or %s class values for argument 'd'", dQuote("Date")), call. = FALSE)
     } else {
       int <- d
     }
@@ -1691,7 +1749,7 @@ CensusToCaptHist <- function(ID, d, dformat = "%Y", timeInt = "Y") {
     if (is.character(d)) {
       d <- as.Date(d, format = dformat)
       if (length(which(is.na(d)))) {
-        stop("Wrong 'dformat' argument or wrong 'd' values.", 
+        stop("wrong 'dformat' argument or wrong 'd' values", 
              call. = FALSE)
       }
     }
@@ -1710,8 +1768,9 @@ CensusToCaptHist <- function(ID, d, dformat = "%Y", timeInt = "Y") {
       }
     }
   } else {
-    stop("Wrong class for argument 'd'. Values\n", 
-         "need to be of class 'integer', 'character' or 'Date'.", 
+    dClass <- paste(dQuote(c('integer', 'character', 'Date')), collapse = ", ")
+    stop(gettextf("wrong class for argument 'd', values need to be of class %s", 
+                  dClass),
          call. = FALSE)
   }  
   
@@ -1744,16 +1803,16 @@ multibasta <- function(object, dataType = "CMR", models,
   
   # Models available:
   mods <- rbind(data.frame(model = "EX", shape = "simple"),
-                expand.grid(model = c("GO", "WE", "LO"), 
+                expand.grid(model = c("GO", "WE", "LO", "GG"), 
                             shape = c("simple", "Makeham", "bathtub")))
   
   # Abreviations for models and shapes:
   modsAbr <- rbind(data.frame(model = "Ex", shape = "Si"),
-                   expand.grid(model = c("Go", "We", "Lo"), 
+                   expand.grid(model = c("Go", "We", "Lo", "Gg"), 
                                shape = c("Si", "Ma", "Bt")))
   
   # Alternative is models and shape are missing (i.e. run all):
-  if (missing(models)) models <- c("EX", "GO", "WE", "LO")
+  if (missing(models)) models <- c("EX", "GO", "WE", "LO", "GG")
   if (missing(shapes)) shapes <- c("simple", "Makeham", "bathtub")
   
   # Models request by user:
@@ -1832,16 +1891,24 @@ summary.multibasta <- function(object, ...) {
     cat(sprintf("\nBaSTA version %s\n", object$runs[[1]]$version))
   }
   
-  cat("\nCall:\n")
-  cat(paste("Covars. structure \t\t: ", object$runs[[1]]$modelSpecs[3], "\n", 
-            sep = ""))
-  cat(paste("Minimum age       \t\t: ", object$runs[[1]]$modelSpecs[4], "\n", 
-            sep = ""))
-  cat(paste("Cat. covars.      \t\t: ", object$runs[[1]]$modelSpecs[5], "\n", 
-            sep = ""))
-  cat(paste("Cont. covars.     \t\t: ", object$runs[[1]]$modelSpecs[6], "\n", 
-            collapse = ""))
+  # Print model specs:
+  obj1 <- object$runs[[1]]
+  if ("Random eff." %in% names(obj1$modelSpecs)) {
+    callDf <- data.frame(obj1$modelSpecs[3:7])
+    rownames(callDf) <- c("Minimum age", "Covars. structure", 
+                          "Categ. covars.", "Cont. covars.", "Random effects")
+    
+  } else {
+    callDf <- data.frame(obj1$modelSpecs[3:6])
+    rownames(callDf) <- c("Covars. structure", "Categ. covars.", 
+                          "Cont. covars.")
+    
+  }
+  colnames(callDf) <- NULL
+  cat("\nCall:")
+  print(callDf, right = FALSE)
   
+  # Settings:
   cat("\nModel settings:\n")
   print(object$runs[[1]]$set)
   
@@ -1864,7 +1931,8 @@ coef.multibasta <- function(object, showAll = FALSE, ...) {
     }
     nmod <- nmod[nmod <= length(object$runs)]
   } else {
-    stop("\nArgument 'showAll' should be logical or an integer.\n", 
+    stop(gettextf("argument 'showAll' should be %s or %s", dQuote("logical"), 
+                  dQuote("integer")), 
          call. = FALSE)
   }
   modNames <- names(object$runs)
@@ -1888,14 +1956,14 @@ coef.multibasta <- function(object, showAll = FALSE, ...) {
 .CreateAlgObj <- function(dataType, model, shape, studyStart, studyEnd, 
                           minAge, covarsStruct, formulaMort, formulaRecap, 
                           recaptTrans, niter, burnin, thinning, updateJumps,
-                          nsim, negSenescence) {
+                          nsim, negSenescence, randEffs) {
   return(list(dataType = dataType, model = model, shape = shape, 
               start = studyStart, end = studyEnd, minAge = minAge, 
               covStruc = covarsStruct, formulaMort = formulaMort, 
               formulaRecap = formulaRecap, recap = recaptTrans, 
               niter = niter, burnin = burnin, thinning = thinning, 
               updJump = updateJumps, nsim = nsim,
-              negSenescence = negSenescence))
+              negSenescence = negSenescence, randEffs = randEffs))
 }
 
 # Prepare data object:
@@ -2222,9 +2290,12 @@ coef.multibasta <- function(object, showAll = FALSE, ...) {
   # ------------------------- #
   # Covariates for mortality:
   # ------------------------- #
-  covClass <- c("noCov", "noCovType", "noCovRecap")
+  covClass <- c("noCov", "noCovType", "noRandEffs", "noCovRecap")
   # Find if mortality covariates are not needed:
   # -------------------------------------------- #
+  # Logical for covariate types:
+  hasTypes <- c(cat = FALSE, cont = FALSE, re = FALSE)
+  
   if (is.null(algObj$formulaMort)) {
     covObj$covs <- NULL
   } else {
@@ -2282,12 +2353,15 @@ coef.multibasta <- function(object, showAll = FALSE, ...) {
       covClass[2] <- "bothCov"
       covObj$cat <- covType$cat
       covObj$cont <- covType$cont
+      hasTypes[c("cat", "cont")] <- TRUE
     } else if (!is.null(covType$cat)) {
       covClass[2] <- "cateCov"
       covObj$cat <- covType$cat
+      hasTypes["cat"] <- TRUE
     } else if (!is.null(covType$cont)) {
       covClass[2] <- "contCov"
       covObj$cont <- covType$cont
+      hasTypes["cont"] <- TRUE
     }
     
     # General covariate names:
@@ -2295,6 +2369,46 @@ coef.multibasta <- function(object, showAll = FALSE, ...) {
                         "[[:blank:]]{1}[[:punct:]]{1}[[:blank:]]{1}")[[1]]
     covObj$genCovs <- genCovs
   }
+  
+  # ==== EDIT 2026-09-23 ==== #
+  # ---------------------------- #
+  # Random effects on mortality:
+  # ---------------------------- #
+  if (!is.null(algObj$randEffs)) {
+    if (any(!algObj$randEffs %in% colnames(object))) {
+      stop("values in 'randEffs' are out of bounds, verify they match the 'object' column names", call. = FALSE)
+    } else {
+      nre <- length(algObj$randEffs)
+      ranEffList <- list(n = nre, renames = algObj$randEffs)
+      for (ire in 1:nre) {
+        rename <- algObj$randEffs[ire]
+        iform <- as.formula(sprintf("~ %s - 1", rename))
+        ireMat <- .MakeCovMat(covform = iform, data = object)[, -1]
+        nIDs <- ncol(ireMat)
+        indIDs <- gsub(rename, "", colnames(ireMat))
+        reID <- rep(rename, nIDs)
+        if (ire == 1) {
+          ranEffList$mat <- ireMat
+          ranEffList$reID <- reID
+          ranEffList$indIDs <- indIDs
+        } else {
+          ranEffList$mat <- cbind(ranEffList$mat, ireMat)
+          ranEffList$reID <- c(ranEffList$reID, reID)
+          ranEffList$indIDs <- c(ranEffList$indIDs, indIDs)
+        }
+      }
+      ranEffList$ntot <- length(ranEffList$reID)
+      covClass[3] <- "randEffs"
+      covObj$randEffs <- ranEffList
+      hasTypes["re"] <- TRUE
+    }
+  } else {
+    covObj$randEffs <- NA
+  }
+  # ==== END OF EDIT ==== #
+  
+  # add the types:
+  covObj$types <- hasTypes
   
   # ------------------------------------- #
   # Covariates for recapture probability:
@@ -2370,6 +2484,11 @@ coef.multibasta <- function(object, showAll = FALSE, ...) {
 
 # Set the default mortality parameters:
 .SetDefaultTheta  <- function(algObj) {
+  # Warning for negative senescence:
+  if (algObj$negSenescence & 
+      (algObj$model != "GO" | algObj$shape != "Makeham")) {
+    warning(gettextf("negative senescence can only be tested with model = %s and shape = %s", dQuote("GO"), dQuote("Makeham")))
+  }
   if (algObj$model == "EX") {
     nTh <- 1
     startTh <- 0.2 
@@ -2387,7 +2506,13 @@ coef.multibasta <- function(object, showAll = FALSE, ...) {
     priorSd <- c(5, 1) # 2023-02-18
     nameTh <- c("b0", "b1")
     lowTh <- c(-Inf, 0)
-    if (algObj$negSenescence) lowTh[2] <- -Inf
+    # ==== EDIT 2026-09-23 ==== #
+    # Forced that negative senescence can only
+    # be tested for Gompertz-Makeham model
+    if (algObj$negSenescence & algObj$shape == "Makeham") {
+      lowTh[2] <- -Inf
+    }
+    # ==== END OF EDIT ==== #
     jitter <- c(0.5, 0.2) 
     if (algObj$shape == "bathtub") {
       lowTh <- c(-Inf, 0)
@@ -2410,6 +2535,15 @@ coef.multibasta <- function(object, showAll = FALSE, ...) {
     nameTh <- c("b0", "b1", "b2")
     lowTh <- c(-Inf, 0, 0)
     jitter <- c(0.5, 0.2, 0.5) 
+  } else if (algObj$model == "GG") {
+    nTh <- 3 
+    startTh <- c(0.1, 10, 10) 
+    jumpTh <- c(0.01, 0.1, 0.1) 
+    priorMean <- c(0.5, 20, 20)
+    priorSd <- c(1, 10, 10)
+    nameTh <- c("b0", "b1", "b2")
+    lowTh <- c(0, 1, 1)
+    jitter <- c(0.2, 5, 5) 
   }
   if (algObj$shape == "Makeham") {
     nTh <- nTh + 1 
@@ -2473,15 +2607,13 @@ coef.multibasta <- function(object, showAll = FALSE, ...) {
               list(colnames(covObj$inMort), defTheta$name)
           }
         } else {
-          stop(paste("\nDimensions of theta ", statName[st], 
-                     " matrix are incorrect.\n",
-                     "Provide a single vector of length ", defTheta$length,
-                     "\nor a matrix of dimensions ", covObj$imLen ," times ", 
-                     defTheta$length, 
-                     ".\n(i.e. number of covariates times number", 
-                     " of\n parameters for model ", 
-                     algObj$model," with ", algObj$shape, " shape).", 
-                     sep = ""), call. = FALSE)
+          stMessage <- paste("the dimensions of theta ", statName[st], 
+                             " matrix are incorrect, ",
+                             "provide a single vector of length ", defTheta$length,
+                             " or a matrix of dimensions ", covObj$imLen ," 
+                             times ", defTheta$length, 
+                             sep = "")
+          stop(stMessage, call. = FALSE)
         }
       }
       allstatName <- paste(rep(defTheta$name, 
@@ -2499,11 +2631,10 @@ coef.multibasta <- function(object, showAll = FALSE, ...) {
             matrix(userPars$theta[[statName[st]]], 1, defTheta$length, 
                    dimnames = list(NULL, defTheta$name))
         } else {
-          stop(paste("\nLength of theta ", statName[st], " is incorrect.\n",
-                     "Provide a single vector of length ", defTheta$length,
-                     ".\n(i.e. number of parameters for model ", 
-                     algObj$model," with ", algObj$shape, " shape).", 
-                     sep = ""), call. = FALSE)
+          stMessage <- paste("length of 'theta' ", statName[st], " is incorrect, ",
+                             "provide a single vector of length ", defTheta$length,
+                             sep = "")
+          stop(stMessage, call. = FALSE)
         }
       }
       allstatName <- defTheta$name
@@ -2524,10 +2655,10 @@ coef.multibasta <- function(object, showAll = FALSE, ...) {
           fullParObj$gamma[[statName[st]]] <- userPars$gamma[[statName[st]]]
           names(fullParObj$gamma[[statName[st]]]) <- colnames(covObj$propHaz)
         } else {
-          stop(paste("\nLength of gamma parameters is incorrect.\n",
-                     "Provide a single vector of length ", covObj$phLen,
-                     ".\n(i.e. number of proportional hazards covariates).", 
-                     sep = ""), call. = FALSE)
+          stMessage <- paste("length of gamma parameters is incorrect, ",
+                             "provide a single vector of length ", covObj$phLen, 
+                             sep = "")
+          stop(stMessage, call. = FALSE)
         }
       }
     }
@@ -2550,6 +2681,20 @@ coef.multibasta <- function(object, showAll = FALSE, ...) {
   } else {
     Classes <- c(Classes, "noLambda")
   }
+  
+  # ==== EDIT 2026-09-23 ==== #
+  # Random effects:
+  if (inherits(covObj, "randEffs")) {
+    fullParObj$re <- list(len = covObj$randEffs$ntot)
+    fullParObj$re$ui <- rep(0, covObj$randEffs$ntot)
+    fullParObj$re$onev <- rep(1, covObj$randEffs$ntot) # may not need this...
+    fullParObj$re$pSD <- 1
+    fullParObj$re$pMU <- 0
+    Classes <- c(Classes, "randEffs")
+  } else {
+    Classes <- c(Classes, "noRandEffs")
+  }
+  # ==== END OF EDIT ==== #
   
   # Detection probability:
   if (inherits(dataObj,  "bastacmr")) {
@@ -2624,6 +2769,12 @@ coef.multibasta <- function(object, showAll = FALSE, ...) {
   if (inherits(fullParObj,  c("pi", "piEta"))) {
     parObj$pi <- fullParObj$pi$start
   }
+  # ==== EDIT 2026-09-23 ==== #
+  # add random effects
+  if (inherits(fullParObj, "randEffs")) {
+    parObj$re <- fullParObj$re$ui
+  }
+  # ==== END OF EDIT ==== #
   class(parObj) <- class(fullParObj)
   return(parObj)
 }
@@ -2649,6 +2800,15 @@ coef.multibasta <- function(object, showAll = FALSE, ...) {
       parCovObjn$gamma <- rep(0, dataObj$n)
     }
   }
+  
+  # ==== NEW EDIT 2026-09-23 ==== #
+  # Random effects
+  if (is.null(parCov)) {
+    parCovObjn$re <- rep(0, dataObj$n)
+  }
+  if (type == "randEffs") {
+    parCovObjn$re <- covObj$randEffs$mat %*% parObj$re
+  } 
   return(parCovObjn)
 }
 
@@ -2723,10 +2883,10 @@ coef.multibasta <- function(object, showAll = FALSE, ...) {
   } else if (algObj$model == "WE") {
     if (algObj$shape == "simple") {
       mortfun <- function(theta, x) {
+        id0 <- which(x == 0)
+        if (length(id0) > 0) x[id0] <- max(x) * 1e-3
         mu <- theta[, "b0"] * theta[, "b1"]^theta[, "b0"] * 
           x^(theta[, "b0"] - 1)
-        id0 <- which(x == 0)
-        if (length(id0) > 0) mu[id0] <- min(mu[-id0])
         return(mu)
       }
     } else if (algObj$shape == "Makeham") {
@@ -2770,6 +2930,33 @@ coef.multibasta <- function(object, showAll = FALSE, ...) {
              theta[, "b1"] * (exp(theta[, "b1"] * x) - 1))
       }
     }
+  } else if (algObj$model == "GG") {
+    if (algObj$shape == "simple") {
+      mortfun <- function(theta, x) {
+        id0 <- which(x == 0)
+        if (length(id0) > 0) x[id0] <- max(x) * 1e-3
+        mu <- theta[, "b2"] * theta[, "b0"] * theta[, "b1"] * 
+          exp(- theta[, "b0"] * x) * 
+          (1 - exp(- theta[, "b0"] * x))^(theta[, "b1"] - 1) / 
+          (1 - (1 - exp(- theta[, "b0"] * x))^(theta[, "b1"]))
+        return(mu)
+      }
+    } else if (algObj$shape == "Makeham") {
+      mortfun <- function(theta, x) {
+        theta[, "c"] + theta[, "b2"] * theta[, "b0"] * theta[, "b1"] * 
+          exp(- theta[, "b0"] * x) * 
+          (1 - exp(- theta[, "b0"] * x))^(theta[, "b1"] - 1) / 
+          (1 - (1 - exp(- theta[, "b0"] * x))^(theta[, "b1"]))
+      }
+    } else {
+      mortfun <- function(theta, x) {
+        exp(theta[, "a0"] - theta[, "a1"] * x) + theta[, "c"] + 
+          theta[, "b2"] * theta[, "b0"] * theta[, "b1"] * 
+          exp(- theta[, "b0"] * x) * 
+          (1 - exp(- theta[, "b0"] * x))^(theta[, "b1"] - 1) / 
+          (1 - (1 - exp(- theta[, "b0"] * x))^(theta[, "b1"]))
+      }
+    }
   }
   return(mortfun)
 }
@@ -2802,8 +2989,10 @@ coef.multibasta <- function(object, showAll = FALSE, ...) {
   } else if (algObj$model == "WE") {
     if (algObj$shape == "simple") {
       mortfun <- function(theta, x) {
+        id0 <- which(x == 0)
+        if (length(id0) > 0) x[id0] <- max(x) * 1e-3
         mu <- theta["b0"] * theta["b1"]^theta["b0"] * 
-          (x + 0.003)^(theta["b0"] - 1)
+          x^(theta["b0"] - 1)
         return(mu)
       }
     } else if (algObj$shape == "Makeham") {
@@ -2843,6 +3032,32 @@ coef.multibasta <- function(object, showAll = FALSE, ...) {
           exp(theta["b0"] + theta["b1"] * x) / 
           (1 + theta["b2"] * exp(theta["b0"]) / 
              theta["b1"] * (exp(theta["b1"] * x) - 1))
+      }
+    }
+  } else if (algObj$model == "GG") {
+    if (algObj$shape == "simple") {
+      mortfun <- function(theta, x) {
+        id0 <- which(x == 0)
+        if (length(id0) > 0) x[id0] <- max(x) * 1e-3
+        mu <- theta["b2"] * theta["b0"] * theta["b1"] * exp(- theta["b0"] * x) * 
+          (1 - exp(- theta["b0"] * x))^(theta["b1"] - 1) / 
+          (1 - (1 - exp(- theta["b0"] * x))^(theta["b1"]))
+        return(mu)
+      }
+    } else if (algObj$shape == "Makeham") {
+      mortfun <- function(theta, x) {
+        theta["c"] + theta["b2"] * theta["b0"] * theta["b1"] * 
+          exp(- theta["b0"] * x) * 
+          (1 - exp(- theta["b0"] * x))^(theta["b1"] - 1) / 
+          (1 - (1 - exp(- theta["b0"] * x))^(theta["b1"]))
+      }
+    } else {
+      mortfun <- function(theta, x) {
+        exp(theta["a0"] - theta["a1"] * x) + theta["c"] + 
+          theta["b2"] * theta["b0"] * theta["b1"] * 
+          exp(- theta["b0"] * x) * 
+          (1 - exp(- theta["b0"] * x))^(theta["b1"] - 1) / 
+          (1 - (1 - exp(- theta["b0"] * x))^(theta["b1"]))
       }
     }
   }
@@ -2908,6 +3123,23 @@ coef.multibasta <- function(object, showAll = FALSE, ...) {
           (1 / theta[, "b2"])
       }
     }
+  } else if (algObj$model == "GG") {
+    if (algObj$shape == "simple") {
+      cumhazfun <- function(theta, x) {
+        - theta[, "b2"] * log(1 - (1 - exp(- theta[, "b0"] * x))^(theta[, "b1"]))
+      }
+    } else if (algObj$shape == "Makeham") {
+      cumhazfun <- function(theta, x) {
+        theta[, "c"] * x - theta[, "b2"] * 
+          log(1 - (1 - exp(- theta[, "b0"] * x))^(theta[, "b1"]))
+      }
+    } else {
+      cumhazfun <- function(theta, x) {
+        exp(theta[, "a0"]) / theta[, "a1"] * (1 - exp(-theta[, "a1"] * x)) +
+          theta[, "c"] * x - theta[, "b2"] * 
+          log(1 - (1 - exp(- theta[, "b0"] * x))^(theta[, "b1"]))
+      }
+    }
   }
   return(cumhazfun)
 }
@@ -2970,6 +3202,23 @@ coef.multibasta <- function(object, showAll = FALSE, ...) {
           (1 / theta["b2"])
       }
     }
+  } else if (algObj$model == "GG") {
+    if (algObj$shape == "simple") {
+      cumhazfun <- function(theta, x) {
+        - theta["b2"] * log(1 - (1 - exp(- theta["b0"] * x))^(theta["b1"]))
+      }
+    } else if (algObj$shape == "Makeham") {
+      cumhazfun <- function(theta, x) {
+        theta["c"] * x - theta["b2"] * 
+          log(1 - (1 - exp(- theta["b0"] * x))^(theta["b1"]))
+      }
+    } else {
+      cumhazfun <- function(theta, x) {
+        exp(theta["a0"]) / theta["a1"] * (1 - exp(-theta["a1"] * x)) +
+          theta["c"] * x - theta["b2"] * 
+          log(1 - (1 - exp(- theta["b0"] * x))^(theta["b1"]))
+      }
+    }
   }
   return(cumhazfun)
 }
@@ -3028,6 +3277,23 @@ coef.multibasta <- function(object, showAll = FALSE, ...) {
               theta[, "c"] * x) * (1 + theta[, "b2"] * 
                                      exp(theta[, "b0"]) / theta[, "b1"] * 
                                      (exp(theta[, "b1"] * x) - 1))^(-1 / theta[, "b2"])
+      }
+    }
+  } else if (algObj$model == "GG") {
+    if (algObj$shape == "simple") {
+      survfun <- function(theta, x) {
+        (1 - (1 - exp(- theta[, "b0"] * x))^(theta[, "b1"]))^theta[, "b2"]
+      }
+    } else if (algObj$shape == "Makeham") {
+      survfun <- function(theta, x) {
+        exp(-theta[, "c"] * x) * 
+          (1 - (1 - exp(- theta[, "b0"] * x))^(theta[, "b1"]))^theta[, "b2"]
+      }
+    } else {
+      survfun <- function(theta, x) {
+        exp(exp(theta[, "a0"]) / theta[, "a1"] * (exp(-theta[, "a1"] * x) - 1) -
+              theta[, "c"] * x) * 
+          (1 - (1 - exp(- theta[, "b0"] * x))^(theta[, "b1"]))^theta[, "b2"]
       }
     }
   }
@@ -3089,6 +3355,23 @@ coef.multibasta <- function(object, showAll = FALSE, ...) {
                                    (exp(theta["b1"] * x) - 1))^(-1 / theta["b2"])
       }
     }
+  } else if (algObj$model == "GG") {
+    if (algObj$shape == "simple") {
+      survfun <- function(theta, x) {
+        (1 - (1 - exp(- theta["b0"] * x))^(theta["b1"]))^theta["b2"]
+      }
+    } else if (algObj$shape == "Makeham") {
+      survfun <- function(theta, x) {
+        exp(-theta[, "c"] * x) * 
+          (1 - (1 - exp(- theta["b0"] * x))^(theta["b1"]))^theta["b2"]
+      }
+    } else {
+      survfun <- function(theta, x) {
+        exp(exp(theta["a0"]) / theta["a1"] * (exp(-theta["a1"] * x) - 1) -
+              theta["c"] * x) * 
+          (1 - (1 - exp(- theta["b0"] * x))^(theta["b1"]))^theta["b2"]
+      }
+    }
   }
   return(survfun)
 }
@@ -3119,58 +3402,6 @@ coef.multibasta <- function(object, showAll = FALSE, ...) {
                       .CalcCumHaz, .CalcCumHaz.numeric, 
                       .CalcCumHaz.matrix) UseMethod(".CalcLike")
 
-# .CalcLike.bastacmr <- function(dataObj, parCovObj, parObj, fullParObj, 
-#                                ageObj, likeObj, ind) {
-#   # First time created:
-#   if (inherits(parObj, "lambda")) {
-#     
-#     # log-interval censored or survival before min age:
-#     likeMbef <- log(exp(- parObj$lambda * ageObj$ages$ageBef[ind]) -
-#                       exp(- parObj$lambda * ageObj$ages$ageBef[ind] + 
-#                             dataObj$Dx) *
-#                       (1 - ageObj$inds$ageBef[ind]))
-#     
-#     # log-survival truncation before min age:
-#     likeHbefTr <- parObj$lambda * ageObj$ages$truBef[ind]
-#   } else {
-#     likeMbef <- 0
-#     likeHbefTr <- 0
-#   }
-#   # log-mortality after min age:
-#   likeMaft <- log(.CalcSurv(parCovObj$theta[ind, ], 
-#                             ageObj$ages$ageAft[ind])^exp(parCovObj$gamma[ind]) -
-#                     .CalcSurv(parCovObj$theta[ind, ], 
-#                               ageObj$ages$ageAft[ind] + 
-#                                 dataObj$Dx)^exp(parCovObj$gamma[ind])) * 
-#     ageObj$inds$uncens[ind] * (1 - ageObj$inds$ageBef[ind])
-#   
-#   # log-survival at truncation after min age: 
-#   # (CHANGE 2021-01-15, Missed prop. hazards)
-#   likeHaftTr <- exp(parCovObj$gamma[ind]) * 
-#     .CalcCumHaz(parCovObj$theta[ind, ], ageObj$ages$truAft[ind])
-#   
-#   # log-likelihood for ages (without recapture):
-#   likeAges <- likeMbef + likeMaft
-#   
-#   # log-likelihood for mortality parameters:
-#   likeObj$df$mort[ind] <- likeAges + likeHbefTr + likeHaftTr
-#   
-#   # Including recapture probability before first obs. and after last obs.:
-#   likeRecap <- c((ageObj$alive - dataObj$obsMat)[ind, ] %*% 
-#                    log(1 - parObj$pi[fullParObj$pi$idpi]))
-#   
-#   # log-likelihood for ages:
-#   likeObj$df$ages[ind] <- likeAges + likeRecap
-#   
-#   # Sum of log-like for parameters:
-#   likeObj$pars <- sum(likeObj$df$mort)
-#   
-#   # Assign class to likelihood object:
-#   class(likeObj) <- "likecmr"
-#   return(likeObj)
-# }
-
-
 .CalcLike.bastacmr <- function(dataObj, parCovObj, parObj, fullParObj, 
                                ageObj, likeObj, algObj, ind, 
                                .CalcMort, .CalcMort.numeric, .CalcMort.matrix, 
@@ -3195,15 +3426,17 @@ coef.multibasta <- function(object, showAll = FALSE, ...) {
   
   # log-mortality after min age:
   likeMaft <- log(.CalcSurv(parCovObj$theta[ind, ], 
-                            ageObj$ages$ageAft[ind])^exp(parCovObj$gamma[ind]) -
+                            ageObj$ages$ageAft[ind])^exp(parCovObj$gamma[ind] +
+                                                           parCovObj$re[ind]) -
                     .CalcSurv(parCovObj$theta[ind, ], 
                               ageObj$ages$ageAft[ind] + 
-                                dataObj$Dx)^exp(parCovObj$gamma[ind])) * 
+                                dataObj$Dx)^exp(parCovObj$gamma[ind] +
+                                                  parCovObj$re[ind])) * 
     ageObj$inds$uncens[ind] * (1 - ageObj$inds$ageBef[ind])
   
   # log-survival at truncation after min age: 
   # (CHANGE 2021-01-15, Missed prop. hazards)
-  likeHaftTr <- exp(parCovObj$gamma[ind]) * 
+  likeHaftTr <- exp(parCovObj$gamma[ind] + parCovObj$re[ind]) * 
     .CalcCumHaz(parCovObj$theta[ind, ], ageObj$ages$truAft[ind])
   
   # log-likelihood for ages (without recapture):
@@ -3251,18 +3484,18 @@ coef.multibasta <- function(object, showAll = FALSE, ...) {
     likeHbefTr <- 0
   }
   # log-mortality after min age:
-  likeMaft <- (parCovObj$gamma[ind] + 
+  likeMaft <- (parCovObj$gamma[ind] + parCovObj$re[ind] +
                  log(.CalcMort(parCovObj$theta[ind, ], 
                                ageObj$ages$ageAft[ind]))) * 
     ageObj$inds$uncens[ind] * (1 - ageObj$inds$ageBef[ind])
   
   # log-survival after min age:
-  likeHaft <- - exp(parCovObj$gamma[ind]) * 
+  likeHaft <- - exp(parCovObj$gamma[ind] + parCovObj$re[ind]) * 
     .CalcCumHaz(parCovObj$theta[ind, ], ageObj$ages$ageAft[ind])
   
   # log-survival at truncation after min age: 
   # (CHANGE 2021-01-15, Missed prop. hazards)
-  likeHaftTr <- exp(parCovObj$gamma[ind]) * 
+  likeHaftTr <- exp(parCovObj$gamma[ind] + parCovObj$re[ind]) * 
     .CalcCumHaz(parCovObj$theta[ind, ], ageObj$ages$truAft[ind])
   
   # log-likelihood for ages (without recapture):
@@ -3290,6 +3523,13 @@ coef.multibasta <- function(object, showAll = FALSE, ...) {
   # Create posterior list object:
   postObj <- list(priorThe = 0, priorGam = 0, priorLam = 0, postPars = 0, 
                   postAge = rep(0, dataObj$n), priorAge = rep(0, dataObj$n))
+  if (inherits(covObj, "randEffs")) {
+    postObj$priorRE <- rep(0, covObj$randEffs$ntot) 
+    postObj$postRE <- rep(0, covObj$randEffs$ntot)
+  } else {
+    postObj$priorRE <- 0
+    postObj$postRE <- 0
+  }
   
   # Prior for theta parameters:
   # --------------------------- #
@@ -3327,6 +3567,16 @@ coef.multibasta <- function(object, showAll = FALSE, ...) {
   }
   postObj$postAge <- likeObj$df$ages + postObj$priorAge
   
+  # ==== NEW EDIT 2026-09-24 ==== #
+  # Posterior for random effects:
+  # ----------------------------- #
+  if (inherits(covObj, "randEffs")) {
+    postObj$priorRE <- dnorm(x = parObj$re, mean = fullParObj$re$pMU, 
+                             sd = fullParObj$re$pSD, log = TRUE)
+    postObj$postRE <- t(likeObj$df$mort) %*% covObj$randEffs$mat +
+      postObj$priorRE
+    postObj$postPars <- postObj$postPars + sum(postObj$priorRE)
+  }
   return(postObj)
 }
 
@@ -3352,7 +3602,7 @@ coef.multibasta <- function(object, showAll = FALSE, ...) {
     postObj$priorLam <- .dtnorm(parObj$lambda, fullParObj$lambda$priorMean,
                                 fullParObj$lambda$priorSd, lower = 0, 
                                 log = TRUE)
-  } else {
+  } else if (type == "pi") {
     # posterior for ages:
     # ------------------- #
     if (inherits(dataObj, "bastacmr")) {
@@ -3361,11 +3611,22 @@ coef.multibasta <- function(object, showAll = FALSE, ...) {
                                             .CalcSurv.numeric, 
                                             .CalcSurv.matrix)
     }
+  } else if (type == "randEffs") {
+    # ==== NEW EDIT 2026-09-24 ==== #
+    # Random effects
+    if (inherits(parObj, "randEffs")) {
+      postObj$priorRE <- dnorm(x = parObj$re, mean = fullParObj$re$pMU, 
+                               sd = fullParObj$re$pSD, log = TRUE)
+      postObj$postRE <- t(likeObj$df$mort) %*% covObj$randEffs$mat +
+        postObj$priorRE
+    } 
+    # ==== END OF EDIT ==== #
   }
   # Posterior for all parameters:
   # ------------------------------ #
   postObj$postPars <- likeObj$pars + postObj$priorThe + postObj$priorGam + 
-    postObj$priorLam
+    postObj$priorLam + sum(postObj$priorRE)
+  
   postObj$postAge <- likeObj$df$ages + postObj$priorAge
   return(postObj)
 }
@@ -3473,7 +3734,7 @@ coef.multibasta <- function(object, showAll = FALSE, ...) {
 
 # Sample parameters:
 .SamplePars <- function(parObj, parJumps, fullParObj, dataObj,
-                        ageObj, type = "theta", pp) {
+                        ageObj, covObj, type = "theta", pp) {
   parObjn <- parObj
   if (type == 'theta') {
     nthe <- fullParObj$theta$len
@@ -3489,13 +3750,23 @@ coef.multibasta <- function(object, showAll = FALSE, ...) {
       parObjn$lambda <- .rtnorm(1, parObj$lambda, parJumps$lambda, 
                                 lower = fullParObj$lambda$lower)
     }
-  } else {
+  } else if (type == "pi") {
     if (inherits(parObj, "pi")) {
       rho2 <- fullParObj$pi$prior2 + 
         t(t(ageObj$alive - dataObj$Y) %*% rep(1, dataObj$n))
       Rho2 <- tapply(rho2, fullParObj$pi$idpi, sum)
       parObjn$pi <- rbeta(fullParObj$pi$n, fullParObj$pi$Prior1, Rho2)
     }
+  } else if (type == "randEffs") {
+    # ==== EDIT 2026-09-24 ==== #
+    # Random Effects:
+    if (inherits(parObj, "randEffs")) {
+      idpp <- which(covObj$randEffs$reID == covObj$randEffs$renames[pp])
+      npp <- length(idpp)
+      parObjn$re[idpp] <- rnorm(n = npp, mean = parObj$re[idpp],
+                                    sd = 0.1)
+    }
+    # ==== END OF EDIT ==== #
   }
   return(parObjn)
 }
@@ -3717,7 +3988,7 @@ coef.multibasta <- function(object, showAll = FALSE, ...) {
 # --------------------------- #
 # Function to create output and jumps matrices:
 .CreateMCMCoutObj <- function(fullParObj, dataObj, algObj, parObj, ageObj,
-                              likeObj, postObj, outidObj,
+                              likeObj, postObj, outidObj, covObj,
                               type = "mcmc", matrows) {
   McmcOutObj <- list()
   # Create matrices for parameters:
@@ -3734,8 +4005,16 @@ coef.multibasta <- function(object, showAll = FALSE, ...) {
   if (inherits(fullParObj, "pi") & type == "mcmc") {
     McmcOutObj$pi <- matrix(0, matrows, fullParObj$pi$len)
   }
+  # ==== EDIT 2026-09-24 ===== #
+  # Random effects:
+  if (inherits(fullParObj, "randEffs")) {
+    McmcOutObj$re <- matrix(0, nrow = matrows, ncol = covObj$randEffs$ntot,
+                            dimnames = list(NULL, covObj$randEffs$indIDs))
+  }
+  # ==== END OF EDIT: ==== #
+  
   McmcOutObj <- .FillMCMCoutObj(McmcOutObj, parObj, dataObj, ageObj, likeObj,
-                                postObj, iter = 1, variables = "params", 
+                                postObj, covObj, iter = 1, variables = "params", 
                                 type = type)
   # Fill up initial values:
   if (type == "mcmc") {
@@ -3766,7 +4045,7 @@ coef.multibasta <- function(object, showAll = FALSE, ...) {
 
 # Function to fill in MCMC output list:
 .FillMCMCoutObj <- function(McmcOutObj, parObj, dataObj, ageObj, likeObj,
-                            postObj, iter, variables = "params", 
+                            postObj, covObj, iter, variables = "params", 
                             type = "mcmc") {
   if (variables == "params") {
     McmcOutObj$theta[iter, ] <- c(parObj$theta)
@@ -3788,9 +4067,14 @@ coef.multibasta <- function(object, showAll = FALSE, ...) {
         McmcOutObj$D[iter, ] <- ageObj$ages[dataObj$idNoD, "death"]
       }
     }
-  } else {
+  } else if (variables == "likepost") {
     McmcOutObj$likePost[iter, ] <- c(likeObj$pars, postObj$postPars)
+  } else if (variables == "randEffs") {
+    # ==== EDIT 2026-09-24 ==== #
+    McmcOutObj$re[iter, ] <- parObj$re
+    # ==== END OF EDIT ==== #
   }
+  
   return(McmcOutObj)
 }
 
@@ -3814,6 +4098,11 @@ coef.multibasta <- function(object, showAll = FALSE, ...) {
   parCovNow <- .CalcCovPars(parObj = parNow, parCov = NULL, 
                             covObj = covObj, dataObj = dataObj, 
                             type = "both")
+  if (inherits(covObj, "randEffs")) {
+    parCovNow <- .CalcCovPars(parObj = parNow, parCov = parCovNow, 
+                              covObj = covObj, dataObj = dataObj, 
+                              type = "randEffs")
+  }
   likeNow <- .BuildLikeObj(parCovObj = parCovNow, parObj = parNow, 
                            fullParObj = fullParObj, ageObj = ageNow, 
                            dataObj = dataObj, algObj, .CalcMort, 
@@ -3822,7 +4111,7 @@ coef.multibasta <- function(object, showAll = FALSE, ...) {
                            .CalcCumHaz.numeric, .CalcCumHaz.matrix)
   while (is.na(likeNow$pars) | likeNow$pars == -Inf) {
     parNow <- .JitterPars(parObj, fullParObj, ageObj, dataObj)
-    parCovNow <- .CalcCovPars(parObj = parNow, parCov = NULL, 
+    parCovNow <- .CalcCovPars(parObj = parNow, parCov = parCovNow, 
                               covObj = covObj, dataObj = dataObj, 
                               type = "both")
     likeNow <- .CalcLike(dataObj, parCovNow, parNow, fullParObj, 
@@ -3846,12 +4135,19 @@ coef.multibasta <- function(object, showAll = FALSE, ...) {
     updSeq <- seq(1, niter, iterUpd)
     nUpdSeq <- length(updSeq)
     parJumps <- .SetParJumps(parObj, fullParObj)
-    jumpsMat <- .CreateMCMCoutObj(fullParObj, dataObj, algObj, 
-                                  parObj = parJumps,
-                                  ageNow, type = "jumps", matrows = nUpdSeq)
-    jumpsUpdMat <- .CreateMCMCoutObj(fullParObj, dataObj, algObj, 
-                                     parObj = parJumps,
-                                     ageNow, type = "jumps", matrows = niter)
+    jumpsMat <- .CreateMCMCoutObj(fullParObj = fullParObj, dataObj = dataObj, 
+                                  algObj = algObj, parObj = parJumps,
+                                  ageObj = ageNow, likeObj = likeNow, 
+                                  postObj = postNow, outidObj = outidObj, 
+                                  covObj = covObj, type = "jumps", 
+                                  matrows = nUpdSeq)
+    
+    jumpsUpdMat <- .CreateMCMCoutObj(fullParObj = fullParObj, dataObj = dataObj, 
+                                     algObj = algObj, parObj = parJumps,
+                                     ageObj = ageNow, likeObj = likeNow, 
+                                     postObj = postNow, outidObj = outidObj, 
+                                     covObj = covObj,
+                                     type = "jumps", matrows = niter)
     for (ju in 1:length(jumpsMat)) {
       jumpsUpdMat[[ju]] <- jumpsUpdMat[[ju]] * 0
     }
@@ -3862,11 +4158,13 @@ coef.multibasta <- function(object, showAll = FALSE, ...) {
     niter <- algObj$niter
     burnin <- algObj$burnin
     thinning <- algObj$thinning
-
+    
     # Create MCMC output object:
-    McmcOutObj <- .CreateMCMCoutObj(fullParObj, dataObj, algObj, 
-                                    parObj = parNow, ageNow, likeNow, 
-                                    postNow, outidObj, type = "mcmc", 
+    McmcOutObj <- .CreateMCMCoutObj(fullParObj = fullParObj, dataObj = dataObj, 
+                                    algObj = algObj, parObj = parNow, 
+                                    ageObj = ageNow, likeObj = likeNow, 
+                                    postObj = postNow, outidObj = outidObj, 
+                                    covObj = covObj, type = "mcmc", 
                                     matrows = outidObj$nAll)
     
     # Counter for updated ages:
@@ -3884,8 +4182,8 @@ coef.multibasta <- function(object, showAll = FALSE, ...) {
         ntg <- fullParObj[[tg]]$len
         for (pp in 1:ntg) {
           parNew <- .SamplePars(parNow, parJumps, fullParObj, dataObj, 
-                                ageNow, type = tg, pp = pp)
-          parCovNew <- .CalcCovPars(parObj = parNew, parCov = NULL, 
+                                ageNow, covObj, type = tg, pp = pp)
+          parCovNew <- .CalcCovPars(parObj = parNew, parCov = parCovNow, 
                                     covObj = covObj, dataObj = dataObj, 
                                     type = "both")
           likeNew <- .CalcLike(dataObj, parCovNew, parNew, fullParObj, ageNow, 
@@ -3916,11 +4214,11 @@ coef.multibasta <- function(object, showAll = FALSE, ...) {
         }
       }
     }
-
+    
     # Sample recapture probabilities:
     if (inherits(dataObj, "bastacmr")) {
       parNow <- .SamplePars(parNow, parJumps, fullParObj, dataObj, 
-                            ageNow, type = "pi", pp = pp)
+                            ageNow, covObj, type = "pi", pp = pp)
       if (iter >= burnin) {
         updCount$pi <- updCount$pi + 1
       }
@@ -4002,7 +4300,54 @@ coef.multibasta <- function(object, showAll = FALSE, ...) {
         }
       }
     }
-
+    
+    # ==== NEW EDIT 2026-09-24 ==== #
+    # Sample random effects:
+    if (inherits(parObj, "randEffs")) {
+      postNow <- .CalcPost(likeNow, fullParObj, parNow, postNow, 
+                           dataObj, ageNow, covObj, priorAgeObj, 
+                           type = "randEffs", ind = NA, .CalcSurv, 
+                           .CalcSurv.numeric, .CalcSurv.matrix)
+      
+      for (pp in 1:covObj$randEffs$n) {
+        parNew <- .SamplePars(parNow, parJumps, fullParObj, dataObj, 
+                              ageNow, covObj, type = "randEffs", pp = pp)
+        parCovNew <- .CalcCovPars(parObj = parNew, parCov = parCovNow, 
+                                  covObj = covObj, dataObj = dataObj, 
+                                  type = "randEffs")
+        likeNew <- .CalcLike(dataObj, parCovNew, parNew, fullParObj, ageNow, 
+                             likeNow, algObj, ind = 1:dataObj$n,
+                             .CalcMort, .CalcMort.numeric, .CalcMort.matrix, 
+                             .CalcSurv, .CalcSurv.numeric, .CalcSurv.matrix,
+                             .CalcCumHaz, .CalcCumHaz.numeric, 
+                             .CalcCumHaz.matrix)
+        postNew <- .CalcPost(likeNew, fullParObj, parNew, postNow, 
+                             dataObj, ageNow, covObj, priorAgeObj, 
+                             type = "randEffs", ind = NA, .CalcSurv, 
+                             .CalcSurv.numeric, .CalcSurv.matrix)
+        idNew <- which(covObj$randEffs$reID == covObj$randEffs$renames[pp])
+        postRatio <- exp(postNew$postRE[idNew] - postNow$postRE[idNew])
+        idUpdRe <- idNew[!is.na(postRatio) & 
+                           postRatio > runif(length(idNew))]
+        
+        if (length(idUpdRe) > 0) {
+          parNow$re[idUpdRe] <- parNew$re[idUpdRe]
+          parCovNow <- .CalcCovPars(parObj = parNow, parCov = parCovNow, 
+                                    covObj = covObj, dataObj = dataObj, 
+                                    type = "randEffs")
+          likeNow <- .CalcLike(dataObj, parCovNow, parNow, fullParObj, ageNow, 
+                               likeNow, algObj, ind = 1:dataObj$n,
+                               .CalcMort, .CalcMort.numeric, .CalcMort.matrix, 
+                               .CalcSurv, .CalcSurv.numeric, .CalcSurv.matrix,
+                               .CalcCumHaz, .CalcCumHaz.numeric, 
+                               .CalcCumHaz.matrix)
+          postNow <- .CalcPost(likeNow, fullParObj, parNow, postNow, 
+                               dataObj, ageNow, covObj, priorAgeObj, 
+                               type = "randEffs", ind = NA, .CalcSurv, 
+                               .CalcSurv.numeric, .CalcSurv.matrix)
+        }
+      }
+    }
     # Fill up paramters, likelihood and posterior in output object:
     if (!UpdJumps) {
       if (iter %in% outidObj$all) {
@@ -4014,6 +4359,11 @@ coef.multibasta <- function(object, showAll = FALSE, ...) {
         McmcOutObj <- .FillMCMCoutObj(McmcOutObj, parNow, dataObj, ageNow,
                                       likeNow, postNow, iter = indPars,
                                       variables = "likepost", type = "mcmc")
+        if (inherits(covObj, "randEffs")) {
+          McmcOutObj <- .FillMCMCoutObj(McmcOutObj, parNow, dataObj, ageNow,
+                                        likeNow, postNow, iter = indPars,
+                                        variables = "randEffs", type = "mcmc")
+        }
         
       }
     }
@@ -4061,7 +4411,7 @@ coef.multibasta <- function(object, showAll = FALSE, ...) {
                              .CalcMort.numeric, .CalcMort.matrix, 
                              .CalcSurv, .CalcSurv.matrix, 
                              .CalcSurv.numeric) {
-  cat("Calculating summary statistics...")
+  message("Calculating summary statistics...", appendLF = FALSE)
   nthin <- outidObj$nKeep
   parMat <- bastaOut[[1]]$theta[outidObj$idKeep, ]
   # if (inherits(parMat, "numeric")) {
@@ -4099,6 +4449,14 @@ coef.multibasta <- function(object, showAll = FALSE, ...) {
     parnames <- c(parnames, fullParObj$pi$names)
     updVec <- c(updVec, bastaOut[[1]]$update$pi)
   }
+  # ==== EDIT 2026-09-24 ==== #
+  # Random effects:
+  if (inherits(covObj, "randEffs")) {
+    reMat <- bastaOut[[1]]$re[outidObj$idKeep, ]
+  } else {
+    reMat <- NA
+  }
+  # ==== END OF EDIT ==== #
   for (sim in 1:nsim) {
     if (dataObj$updB) {
       birthMat[dataObj$idNoB, 1:nthin + (sim - 1) * nthin] <- 
@@ -4132,6 +4490,13 @@ coef.multibasta <- function(object, showAll = FALSE, ...) {
           parMat <- matrix(parMat, ncol = 1)
         }
       }
+      # ==== EDIT 2026-09-24 ==== #
+      # Random effects:
+      if (inherits(covObj, "randEffs")) {
+        reMat <- rbind(reMat, bastaOut[[sim]]$re[outidObj$idKeep, ])
+      }
+      # ==== END OF EDIT ==== #
+      
       likePost <- rbind(likePost, bastaOut[[sim]]$likePost[outidObj$idKeep, ])
       updVec <- updVec + tempUpd
     }
@@ -4147,8 +4512,10 @@ coef.multibasta <- function(object, showAll = FALSE, ...) {
                   updVec / updTot)
   colnames(coeffs) <- c("Mean", "StdErr", "Lower95%CI", "Upper95%CI", 
                         "SerAutocorr", "UpdateRate")
+  
+  # Convergence and DIC:
   if (nsim > 1) {
-    
+    # Convergence:
     idSims <- rep(1:algObj$nsim, each = nthin)
     if (inherits(parMat, "numeric")) {
       parMat <- matrix(parMat, ncol = 1)
@@ -4183,16 +4550,47 @@ coef.multibasta <- function(object, showAll = FALSE, ...) {
       convmessage <- "All parameters converged properly.\n"
     } else {
       modSel <- NA
-      convmessage <- "Convergence not reached for some parameters.\n"
+      convmessage <- "Convergence not reached for some parameters."
       conv <- NULL
     }
   } else {
     modSel <- NA
-    convmessage <- "Convergence not calculated due to\ninsuficcient number of simulations.\n"
+    convmessage <- "Convergence not calculated due to insuficcient number of simulations."
     conv <- NULL
   }
-  cat(" Done.\n")
-  cat(convmessage)
+  message(" Done.")
+  message(convmessage)
+  # ===== EDIT 2026-09-24 ==== #
+  # Random effects:
+  if (inherits(covObj, "randEffs")) {
+    reList <- list()
+    for (ire in 1:covObj$randEffs$n) {
+      rename <- covObj$randEffs$renames[ire]
+      idre <- which(covObj$randEffs$reID == rename)
+      indReMu <- cbind(Mean = apply(reMat[, idre], 2, mean),
+                       SD = apply(reMat[, idre], 2, sd), 
+                       Lower = apply(reMat[, idre], 2, quantile, 0.025, 
+                                     names = FALSE),
+                       Upper = apply(reMat[, idre], 2, quantile, 0.975,
+                                     names = FALSE))
+      reVarVec <- apply(reMat[, idre], 1, var)
+      reVar <- c(Mean = mean(reVarVec), SD = sd(reVarVec),
+                 Lower = quantile(reVarVec, 0.025, names = FALSE),
+                 Upper = quantile(reVarVec, 0.975, names = FALSE))
+      if (ire == 1) {
+        reVarSum <- data.frame(Variable = rename, t(reVar))
+        reList$variables <- list()
+      } else {
+        reVarSum <- rbind(reVarSum, 
+                          data.frame(Variable = rename, t(reVar)))
+      }
+      reList$summary <- reVarSum
+      reList$variables[[rename]] <- indReMu
+    }
+  } else {
+    reList <- NA
+  }
+  # ==== END OF EDIT ==== #
   # Kullback-Leibler:
   kulLeib <- .CalcKulbackLeibler(coeffs, covObj, defTheta, fullParObj, 
                                  algObj)
@@ -4236,23 +4634,23 @@ coef.multibasta <- function(object, showAll = FALSE, ...) {
   xv <- seq(0, maxAge, by = Dx)
   
   # Mortality, survival, pdf, and pace-shape quantiles:
-  mortQuan <- .CalcDemoFunQuan(parMat, idTheta, xv, covObj, covsNames, defTheta, 
-                               funtype = "mort", .CalcMort, 
+  mortQuan <- .CalcDemoFunQuan(parMat, reMat, idTheta, xv, covObj, covsNames,
+                               defTheta, funtype = "mort", .CalcMort, 
                                .CalcMort.numeric, .CalcMort.matrix, 
                                .CalcSurv, .CalcSurv.matrix, 
                                .CalcSurv.numeric)
-  survQuan <- .CalcDemoFunQuan(parMat, idTheta, xv, covObj, covsNames, defTheta, 
-                               funtype = "surv", .CalcMort, 
+  survQuan <- .CalcDemoFunQuan(parMat, reMat, idTheta, xv, covObj, covsNames,
+                               defTheta, funtype = "surv", .CalcMort, 
                                .CalcMort.numeric, .CalcMort.matrix, 
                                .CalcSurv, .CalcSurv.matrix, 
                                .CalcSurv.numeric)
-  densQuan <- .CalcDemoFunQuan(parMat, idTheta, xv, covObj, covsNames, defTheta, 
-                               funtype = "dens", .CalcMort, 
+  densQuan <- .CalcDemoFunQuan(parMat, reMat, idTheta, xv, covObj, covsNames,
+                               defTheta, funtype = "dens", .CalcMort, 
                                .CalcMort.numeric, .CalcMort.matrix, 
                                .CalcSurv, .CalcSurv.matrix, 
                                .CalcSurv.numeric)
-  PSQuan <- .CalcDemoFunQuan(parMat, idTheta, xv, covObj, covsNames, defTheta, 
-                             funtype = "PS", .CalcMort, 
+  PSQuan <- .CalcDemoFunQuan(parMat, reMat, idTheta, xv, covObj, covsNames,
+                             defTheta, funtype = "PS", .CalcMort, 
                              .CalcMort.numeric, .CalcMort.matrix, 
                              .CalcSurv, .CalcSurv.matrix, 
                              .CalcSurv.numeric)
@@ -4268,7 +4666,7 @@ coef.multibasta <- function(object, showAll = FALSE, ...) {
                   PS = PSQuan, mort = mortQuan, surv = survQuan, 
                   dens = densQuan, x = xv, cuts = cuts, ageLast = ageLast,
                   ageFirst = ageFirst, convergence = conv, 
-                  convmessage = convmessage)
+                  convmessage = convmessage, randEffs = reList)
   
   return(outList)
 }
@@ -4357,8 +4755,8 @@ coef.multibasta <- function(object, showAll = FALSE, ...) {
 }
 
 # Calculate survival and mortality quantiles:
-.CalcDemoFunQuan <- function(parMat, idTheta, x, covObj, covsNames, defTheta, 
-                             funtype = "mort", .CalcMort, 
+.CalcDemoFunQuan <- function(parMat, reMat, idTheta, x, covObj, covsNames, 
+                             defTheta, funtype = "mort", .CalcMort, 
                              .CalcMort.numeric, .CalcMort.matrix, 
                              .CalcSurv, .CalcSurv.matrix, 
                              .CalcSurv.numeric) {
@@ -4376,10 +4774,13 @@ coef.multibasta <- function(object, showAll = FALSE, ...) {
     }
     fullm$ga$cat <- 0
     fullm$ga$con <- 0
+    fullm$ga$re <- 0 # 2026-10-09 Random effects
     covinf$ga$caname <- ""
     covinf$ga$coname <- ""
+    covinf$ga$rename <- "" # 2026-10-09 Random effects
     covinf$ga$canum <- 0
     covinf$ga$conum <- 0
+    covinf$ga$renum <- 0  # 2026-10-09 Random effects
   } else if (covsNames$class == "fused") {
     fullm$th <- parMat[, idTheta]
     covinf$th$num <- ifelse(length(covsNames$cat) == 0, 0, 
@@ -4400,6 +4801,10 @@ coef.multibasta <- function(object, showAll = FALSE, ...) {
       concol <- concol[-idlambda]
     }
     fullm$ga$con <- parMat[, concol]
+    fullm$ga$re <- 0 # 2026-10-09 Random effects
+    covinf$ga$rename <- "" # 2026-10-09 Random effects
+    covinf$ga$renum <- 0  # 2026-10-09 Random effects
+    
   } else {
     fullm$th <- parMat[, idTheta]
     covinf$th$num <- 0
@@ -4431,6 +4836,20 @@ coef.multibasta <- function(object, showAll = FALSE, ...) {
       covinf$ga$conum <- length(covsNames$con)
       fullm$ga$con <- parMat[, sprintf("gamma.%s", covinf$ga$coname)]
     }
+    
+    fullm$ga$re <- 0 # 2026-10-09 Random effects
+    covinf$ga$rename <- "" # 2026-10-09 Random effects
+    covinf$ga$renum <- 0  # 2026-10-09 Random effects
+    
+  }
+  # ==== 2026-10-09 Random effects edit: ==== #
+  if (covObj$types["re"]) {
+    fullm$ga$re <- sapply(1:nrow(reMat), function(ire) {
+      remu <- mean(covObj$randEffs$mat %*% reMat[ire, ])
+      return(remu)
+    })
+  } else {
+    fullm$ga$re <- 0
   }
   idlambda <- grep("lambda", colnames(parMat))
   # if (length(idlambda) == 1) {
@@ -4456,7 +4875,15 @@ coef.multibasta <- function(object, showAll = FALSE, ...) {
         catname <- nga
       }
       if (is.matrix(fullm$th)) {
-        thm <- fullm$th[, grep(nta, colnames(fullm$th))]
+        # 2025-06-27 Bug reported by Taylor Evans 
+        # 2025-08-13 derived bug reported by Niels Mogensen.
+        if (nta == "") {
+          thname <- defTheta$name
+        } else {
+          thname <- sprintf("%s.%s", defTheta$name, nta)
+        }
+        thm <- fullm$th[, thname] 
+        # end of bug fix.
       } else {
         thm <- matrix(fullm$th, ncol = 1)
       }
@@ -4471,13 +4898,18 @@ coef.multibasta <- function(object, showAll = FALSE, ...) {
         gaco <- fullm$ga$con
       } else {
         if (length(covObj$con) > 1) {
-          gaco <- sum(fullm$ga$con * apply(covObj$propHaz[, names(covObj$cont)],
-                                           2, mean))
+          # ==== BUG 2026-10-01: ==== #
+          # Should have done matrix product:
+          # gaco <- sum(fullm$ga$con * apply(covObj$propHaz[, names(covObj$cont)],
+          #                                  2, mean))
+          gaco <- c(fullm$ga$con %*% apply(covObj$propHaz[, names(covObj$cont)],
+                                         2, mean))
+          # ==== END OF BUG ==== #
         } else {
           gaco <- fullm$ga$con * mean(covObj$propHaz[, names(covObj$cont)])
         }
       }
-      gam <- gaca + gaco
+      gam <- gaca + gaco + fullm$ga$re
       if (length(gam) == 1) {
         gam <- rep(gam, nrow(thm))
       }
@@ -4536,7 +4968,7 @@ coef.multibasta <- function(object, showAll = FALSE, ...) {
 # life expectancy:
 .CalcEx <- function(Sx, dx) sum(Sx * dx) / Sx[1]
 
-# Keyfitz's entropy:
+# Lifespan inequality:
 .CalcHx <- function(Sx, dx) {
   Sx1 <- Sx[Sx > 0]; Sx1 <- Sx1 / Sx1[1]
   -sum(Sx1 * log(Sx1) * dx) / sum(Sx1 * dx)
@@ -4566,7 +4998,7 @@ coef.multibasta <- function(object, showAll = FALSE, ...) {
 # --------------------- #
 # Function to calculate life table output:
 .CalcLifeTable <- function(bastaFinal, covObj, algObj, dataObj) {
-  cat("Constructing life table... ")
+  message("Constructing life table... ", appendLF = FALSE)
   
   # Age at death or last obs:
   ageLastQuan <- bastaFinal$ageLast
@@ -4643,7 +5075,7 @@ coef.multibasta <- function(object, showAll = FALSE, ...) {
     LT[[covar]]$Mean <- npSx$lt
     LT[[covar]]$ple <- npSx$ple
   }
-  cat("done.\n")
+  message(" Done.")
   return(LT)
 }
 

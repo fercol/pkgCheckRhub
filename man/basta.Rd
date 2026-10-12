@@ -17,9 +17,10 @@ basta(object, \dots)
 \method{basta}{default} (object, dataType = "CMR", model = "GO", 
   shape = "simple",  studyStart = NULL, studyEnd = NULL, 
   minAge = 0, covarsStruct = "fused",  formulaMort = NULL, 
-  formulaRecap = NULL, recaptTrans = studyStart,  niter = 22000, 
-  burnin = 2001, thinning = 40, nsim = 1, parallel = FALSE,  
-  ncpus = 2, updateJumps = TRUE, negSenescence = FALSE,  \dots)
+  randEffs = NULL, formulaRecap = NULL, recaptTrans = studyStart,  
+  niter = 22000, burnin = 2001, thinning = 40, nsim = 1, 
+  parallel = FALSE, ncpus = 2, updateJumps = TRUE, 
+  negSenescence = FALSE,  \dots)
 }
 
 \arguments{
@@ -27,11 +28,11 @@ basta(object, \dots)
 
 	\item{dataType }{A \code{character string} indicating if the data are for capture-mark-recapture (CMR) or census. Options are \dQuote{\code{CMR}} (default) or \dQuote{\code{census}}.}
 
-	\item{model }{The underlying mortality model to be used. \code{"EX"} = exponential,\code{"GO"} = Gompertz, \code{"WE"} = Weibull and \code{"LO"} = logistic (see \code{details}).}
+	\item{model }{The underlying mortality model to be used. \code{"EX"} = exponential,\code{"GO"} = Gompertz, \code{"WE"} = Weibull, \code{"LO"} = logistic, and \code{"GG"} = Gavrilov-Gavrilova (see \code{details}).}
 
 	\item{shape }{The overall shape of the model. Values are: \code{simple} = no extra parameters added; \code{Makeham} = a constant parameter is added to the mortality; and \code{bathtub} = a Gompertz declining mortality for early ages and a constant parameter are added to the mortality model (see \code{details}).}
 
-	\item{ studyStart }{Only required for \code{dataType =} \dQuote{\code{CMR}}, an integer indicating the first year of the study.}
+	\item{studyStart }{Only required for \code{dataType =} \dQuote{\code{CMR}}, an integer indicating the first year of the study.}
 
 	\item{studyEnd }{Only required for \code{dataType =} \dQuote{\code{CMR}}, an integer indicating the last year of the study.}
 
@@ -39,7 +40,9 @@ basta(object, \dots)
 
 	\item{covarsStruct }{Character string that indicates how covariates should be evaluated. The options are: \dQuote{\code{fused}}, which defines all categorical variables as covariates for each mortality parameter and all continuous covariates under a proportional hazards structure; \dQuote{\code{prop.haz}}, which puts all covariates under a proportional hazards structure; and \dQuote{\code{all.in.mort}} puts all covariates as a multilevel function of the mortality parameters (see \code{details}).}
 
-	\item{ formulaMort }{An object of class \code{\link{formula}} specifying the covariates to be included on the mortality part of the model. Note that the syntax should not include a dependent variable. If \code{formulaMort = NULL}, then no covariates are included in the analysis. See \code{details}.}
+	\item{formulaMort }{An object of class \code{\link{formula}} specifying the covariates to be included on the mortality part of the model. Note that the syntax should not include a dependent variable. If \code{formulaMort = NULL}, then no covariates are included in the analysis. See \code{details}.}
+
+	\item{randEffs }{A character string or vector indicating which columns should be used for random effects. Default is \code{NULL}.}
 
 	\item{formulaRecap }{\emph{Not yet implemented}, an object of class \code{\link{formula}} specifying the covariates to be included on the recapture part of the model. Note that the syntax should not include a dependent variable. If \code{formulaMort = NULL}, then no covariates are included in the analysis.}
 
@@ -121,12 +124,21 @@ where \eqn{b_0, b_1 > 0}, with survival
 S_b(x | \bm{\theta}) = \exp\left[-(b_1 x)^{b_0}\right].
 }
 
-(d) \code{model = }\dQuote{\code{LO}}: The logistic mortality model (Pletcher 1999), calculated as 
+(d) \code{model = "LO"}: The logistic mortality model (Pletcher 1999), calculated as 
 
 \deqn{\mu_b(x | \bm{\theta}) = \frac{\exp(b_0 + b_1 x)}{1 + b_2 \frac{e^{b_0}}{b_1} \left(e^{b_1 x}-1\right)},}
 where \eqn{b_0, b_1, b_2 > 0}, with survival
 \deqn{
 S_b(x | \bm{\theta}) = \left[1 + b_2 \frac{e^{b_0}}{b_1} \left(e^{b_1 x} - 1\right)\right]^{-1 / b_2}.
+}
+
+(e) \code{model = "GG"}: The reliability mortality model proposed by Gavrilov and Gavrilova (2001), calculated as 
+\deqn{
+\mu_b(x | \bm{\theta}) = \frac{b_2 b_1 b_0 e^{-b_0 x} (1 - e^{-b_0 x})^{b_1 - 1}}{1 - (1 - e^{-b_0 x})^{b_1}},
+}
+where \eqn{b_0, b_1, b_2 > 0}, with survival
+\deqn{
+S_b(x | \bm{\theta}) = \left[1 - (1 - e^{-b_0 x})^{b_1}\right]^{b_2}.
 }
 
 \code{2.2)}\code{Argument }\dQuote{\code{shape}}\code{:}
@@ -187,7 +199,7 @@ where \eqn{\mu_0(x | \theta, Z_a)} represents the baseline mortality as defined 
 
 \code{3.3} \dQuote{\code{all.in.mort}}:
 
-This specification will put all covariates as linear functions of the survival parameters as explained above. Since most models require the lower bounds for the mortality parameters to be equal to 0, the only model that can be used for this test is Gompertz with \code{shape} set to \dQuote{\code{simple}}. In case these arguments are specified differently, a warning message is printed noting that \code{model} will be forced to be \dQuote{\code{GO}} and \code{shape} will be set to \dQuote{\code{simple}}.
+This specification will put all covariates as linear functions of the survival parameters as explained above. Since most models require the lower bounds for the mortality parameters to be equal to 0, the only model that can be used for this test is Gompertz with \code{shape} set to \dQuote{\code{Makeham}}. In case these arguments are specified differently, a warning message is printed noting that \code{model} will be forced to be \dQuote{\code{GO}} and \code{shape} will be set to \dQuote{\code{simple}}.
 
 \bold{4) MCMC SETTINGS}
 
