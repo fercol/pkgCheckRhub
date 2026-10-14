@@ -1,5 +1,6 @@
 \name{multibasta}
 \alias{multibasta}
+\alias{multibasta.default}
 \title{
 Function to run multiple BaSTA models on the same dataset.
 }
@@ -8,8 +9,11 @@ Function to run multiple BaSTA models on the same dataset.
 These functions allow users to run models with different functional forms on the same dataset, to perform model comparison and to visualize the results of the multiple runs.}
 
 \usage{
-multibasta(object, dataType = "CMR", models, shapes, \dots)
+multibasta(object, \dots)
+
+\method{multibasta}{default} (object, dataType = "CMR", models, shapes, \dots)
 }
+
 
 \arguments{
   

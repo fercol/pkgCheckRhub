@@ -1795,8 +1795,10 @@ CensusToCaptHist <- function(ID, d, dformat = "%Y", timeInt = "Y") {
 # A.7) Multi-BaSTA functions:
 # --------------------------- #
 # Main multibasta:
-multibasta <- function(object, dataType = "CMR", models, 
-                       shapes, ...) {
+multibasta <- function(object, ...) UseMethod("multibasta")
+
+multibasta.default <- function(object, dataType = "CMR", models, 
+                               shapes, ...) {
   # Extract arguments:
   argList <- list(...)
   argNames <- names(argList)
@@ -1805,6 +1807,17 @@ multibasta <- function(object, dataType = "CMR", models,
   mods <- rbind(data.frame(model = "EX", shape = "simple"),
                 expand.grid(model = c("GO", "WE", "LO", "GG"), 
                             shape = c("simple", "Makeham", "bathtub")))
+  
+  # Errors:
+  if (any(!models %in% mods$model)) {
+    modelTypes <- paste(dQuote(unique(mods$model)), collapse = ", ")
+    stop(gettextf("wrong 'models' argument, options are %s", modelTypes))
+  }
+  
+  if (any(!shapes %in% mods$shape)) {
+    shapeTypes <- paste(dQuote(unique(mods$shape)), collapse = ", ")
+    stop(gettextf("wrong 'shapes' argument, options are %s", shapeTypes))
+  }
   
   # Abreviations for models and shapes:
   modsAbr <- rbind(data.frame(model = "Ex", shape = "Si"),
@@ -1821,7 +1834,7 @@ multibasta <- function(object, dataType = "CMR", models,
   modsAbr <- modsAbr[idIncl, ]
   nmod <- nrow(mods)
   modNames <- paste(modsAbr$model, modsAbr$shape, sep = ".")
-
+  
   # Define nsim:
   if (!"nsim" %in% argNames) {
     argList$nsim <- 2
@@ -1840,16 +1853,23 @@ multibasta <- function(object, dataType = "CMR", models,
   runList <- list()
   
   # Run models:
+  success <- rep(FALSE, nmod)
+  names(success) <- modNames
   for (mod in 1:nmod) {
     updt <- sprintf("Run number %s, model: %s", mod, modNames[mod])
     cat(paste("\n", paste(rep("-", nchar(updt)), collapse = ""), sep = ""))
     cat(sprintf("\n%s\n", updt))
     cat(paste(paste(rep("-", nchar(updt)), collapse = ""), "\n", sep = ""))
-    out <- basta(object, dataType = dataType, model = mods$model[mod], 
-                 shape = mods$shape[mod], ...)
-    runList[[modNames[mod]]] <- out
-    if (DIC & !is.na(out$DIC[1])) {
-      dics[mod, ] <- out$DIC
+    out <- try(basta(object, dataType = dataType, model = mods$model[mod], 
+                     shape = mods$shape[mod], ...))
+    if (inherits(out, "basta")) {
+      runList[[modNames[mod]]] <- out
+      if (DIC & !is.na(out$DIC[1])) {
+        dics[mod, ] <- out$DIC
+      }
+      success[mod] <- TRUE
+    } else {
+      runList[[modNames[mod]]] <- NA
     }
   }
   
@@ -1870,7 +1890,8 @@ multibasta <- function(object, dataType = "CMR", models,
   }
   
   # Results list:
-  results <- list(runs = runList[idModFit], DICs = modFit, models = mods)
+  results <- list(runs = runList[idModFit], DICs = modFit, models = mods,
+                  success = success)
   class(results) <- "multibasta"
   return(results)
 }

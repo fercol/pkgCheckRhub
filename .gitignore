@@ -6,3 +6,4 @@
 BaSTA2.0.Rcheck/
 BaSTA.Rcheck/
 .DS_Store
+.gitignore
